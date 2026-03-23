@@ -188,6 +188,27 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 | `content_light_level()` | `Option<ContentLightLevel>` | HDR コンテンツライトレベル |
 | `mastering_display()` | `Option<MasteringDisplay>` | HDR マスタリングディスプレイ情報 |
 
+### `SequenceHeader`
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `profile` | `u8` | AV1 プロファイル (0, 1, 2) |
+| `max_width` | `usize` | ストリームの最大幅 |
+| `max_height` | `usize` | ストリームの最大高さ |
+| `layout` | `PixelLayout` | ピクセルレイアウト |
+| `pri` | `ColorPrimaries` | 色域 |
+| `trc` | `TransferCharacteristics` | 伝達特性 |
+| `mtrx` | `MatrixCoefficients` | 行列係数 |
+| `chr` | `ChromaSamplePosition` | クロマサンプル位置 |
+| `bit_depth` | `usize` | ビット深度 (8, 10, 12) |
+| `color_range` | `ColorRange` | 色域レンジ |
+
+### `Error`
+
+| メソッド | 戻り値 | 説明 |
+|---|---|---|
+| `is_eagain()` | `bool` | EAGAIN エラーかどうか |
+
 ### 関数
 
 | 関数 | 戻り値 | 説明 |

@@ -579,6 +579,9 @@ pub struct Decoder {
 
 impl Decoder {
     /// AV1 デコーダーインスタンスを生成する
+    ///
+    /// `operating_point` は 0-31 の範囲で指定すること。
+    /// 不正な設定値を渡した場合は dav1d がエラーを返す
     pub fn new(config: DecoderConfig) -> Result<Self, Error> {
         let mut settings = MaybeUninit::<sys::Dav1dSettings>::zeroed();
         unsafe {
@@ -609,9 +612,14 @@ impl Decoder {
     /// デコード結果は [`Decoder::next_frame()`] で取得できる。
     /// データは dav1d の内部バッファにコピーされる。
     ///
+    /// 空のデータ (`data.is_empty()`) を渡した場合は何もせず `Ok(())` を返す。
+    ///
     /// dav1d の内部バッファが満杯の場合はエラー (EAGAIN) を返す。
     /// その場合は先に [`Decoder::next_frame()`] でフレームを取り出してから再度呼び出すこと
     pub fn decode(&mut self, data: &[u8]) -> Result<(), Error> {
+        if data.is_empty() {
+            return Ok(());
+        }
         let mut dav1d_data = MaybeUninit::<sys::Dav1dData>::zeroed();
         unsafe {
             let dav1d_data_buf_ptr = sys::dav1d_data_create(dav1d_data.as_mut_ptr(), data.len());
@@ -861,7 +869,12 @@ impl DecodedFrame {
 
     /// フレームの Y 成分のストライドを返す (バイト単位)
     ///
-    /// dav1d の stride は `ptrdiff_t` 型だが、負の stride (ボトムアップ画像) はサポートしない
+    /// dav1d の stride は `ptrdiff_t` 型だが、負の stride (ボトムアップ画像) はサポートしない。
+    ///
+    /// # Panics
+    ///
+    /// dav1d が負の stride を返した場合にパニックする。
+    /// dav1d のデフォルトアロケータでは発生しない
     pub fn y_stride(&self) -> usize {
         assert!(self.0.stride[0] >= 0, "negative stride is not supported");
         self.0.stride[0] as usize
@@ -871,7 +884,12 @@ impl DecodedFrame {
     ///
     /// dav1d の stride は `ptrdiff_t` 型だが、負の stride (ボトムアップ画像) はサポートしない。
     /// [`PixelLayout::I400`] の場合でも dav1d の内部値が返されるが、
-    /// クロマプレーン自体は存在しないため [`u_plane()`](Self::u_plane) は空のスライスを返す
+    /// クロマプレーン自体は存在しないため [`u_plane()`](Self::u_plane) は空のスライスを返す。
+    ///
+    /// # Panics
+    ///
+    /// dav1d が負の stride を返した場合にパニックする。
+    /// dav1d のデフォルトアロケータでは発生しない
     pub fn u_stride(&self) -> usize {
         assert!(self.0.stride[1] >= 0, "negative stride is not supported");
         self.0.stride[1] as usize

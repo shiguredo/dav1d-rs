@@ -91,6 +91,11 @@
     `frame_size_limit`, `strict_std_compliance`, `output_invisible_frames`,
     `inloop_filters`, `decode_frame_type`
   - @voluntas
+- [ADD] `Error::is_eagain()` で EAGAIN エラーの判定ができるようにする
+  - @voluntas
+- [CHANGE] `SequenceHeader` の `hbd` フィールドを `bit_depth` に変更する
+  - dav1d 内部のインデックス値 (0, 1, 2) ではなく実際のビット深度 (8, 10, 12) を格納する
+  - @voluntas
 - [CHANGE] `Decoder::new()` を `Decoder::new(DecoderConfig)` に変更する
   - `DecoderConfig` でスレッド数などのデコーダー設定を指定できるようにする
   - @voluntas
