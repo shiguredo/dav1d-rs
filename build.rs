@@ -619,26 +619,31 @@ fn collect_defined_external_symbols(nm_path: &Path, lib_path: &Path) -> Vec<Stri
     let mut symbols: Vec<String> = stdout
         .lines()
         .map(|line| line.trim().to_string())
-        .filter(|s| !s.is_empty() && is_c_identifier(s))
+        .filter(|s| !s.is_empty() && is_symbol_name(s))
         .collect();
     symbols.sort();
     symbols.dedup();
     symbols
 }
 
-/// C 識別子として有効かどうかを判定する
+/// シンボル名として有効かどうかを判定する
 ///
 /// llvm-nm の --format=just-symbols 出力にはオブジェクトファイル名 (dav1d.c.o: 等) も
-/// 含まれるため、この関数で C 識別子のみをフィルタリングする。
+/// 含まれるため、この関数でシンボル名のみをフィルタリングする。
 ///
 /// macOS の Mach-O ではシンボル先頭に `_` が付くため、`_` で始まる文字列も受け入れる。
-fn is_c_identifier(s: &str) -> bool {
+///
+/// NASM が生成する x86_64 向けシンボルには `.` が含まれる場合がある
+/// (例: dav1d_cdef_dir_8bpc_avx2.main)。これらもリネーム対象にするため `.` を許可する。
+/// オブジェクトファイル名は末尾に `:` が付く (例: dav1d.c.o:) ため、
+/// `:` を不許可にすることで区別する。
+fn is_symbol_name(s: &str) -> bool {
     let mut chars = s.chars();
     match chars.next() {
         Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
         _ => return false,
     }
-    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    chars.all(|c| c == '_' || c == '.' || c.is_ascii_alphanumeric())
 }
 
 /// objcopy 用と bindgen 用のリネームマップを生成する

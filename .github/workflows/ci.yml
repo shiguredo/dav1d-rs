@@ -93,10 +93,11 @@ jobs:
           # 定義済み外部シンボルのうち shiguredo_dav1d_ プレフィックスが付いていないものを検出する
           # macOS では先頭 _ を除去して判定する
           # --format=just-symbols はオブジェクトファイル名も出力するため、
-          # C 識別子のみをフィルタリングする（.c.o: などを除外）
+          # シンボル名のみをフィルタリングする（.c.o: などは末尾に : が付くため除外される）
+          # NASM 生成シンボルは . を含む場合がある (例: dav1d_cdef_dir_8bpc_avx2.main)
           VIOLATIONS=$("$LLVM_NM" --defined-only --extern-only --format=just-symbols "$LIB_PATH" \
             | sed 's/^_//' \
-            | grep -E '^[a-zA-Z_][a-zA-Z0-9_]*$' \
+            | grep -E '^[a-zA-Z_][a-zA-Z0-9_.]*$' \
             | grep -v '^shiguredo_dav1d_' \
             || true)
 
