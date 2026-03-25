@@ -7,6 +7,9 @@ use std::{ffi::CStr, ffi::c_int, mem::MaybeUninit};
 
 mod sys;
 
+mod codec_info;
+pub use codec_info::*;
+
 /// リンクされている dav1d ライブラリのバージョン文字列を返す
 ///
 /// # Panics
