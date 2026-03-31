@@ -1,6 +1,6 @@
 [package]
 name = "shiguredo_dav1d"
-version = "2026.1.0-canary.4"
+version = "2026.1.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Shiguredo Inc."]
@@ -18,8 +18,8 @@ source-build = []
 [dependencies]
 
 [build-dependencies]
-bindgen = "0.72.0"
-shiguredo_toml = "2026.1.0"
+bindgen = "0.72"
+shiguredo_toml = "2026.1"
 
 [dev-dependencies]
 shiguredo_aom = "2026.1.0-canary.0"
