@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "develop"
+      - "feature/**"
+    tags-ignore:
+      - "**"
+    paths-ignore:
+      - "**.md"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt-clippy:
+    name: fmt-clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable
+      - run: sudo apt-get update && sudo apt-get install -y build-essential meson ninja-build nasm
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ubuntu-24.04
+          toolchain: stable
+      - run: cargo fmt --all --check
+      - run: cargo clippy --features source-build -- -D warnings
+
+  test:
+    name: ${{ matrix.os }}
+    needs: fmt-clippy
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04
+          - os: ubuntu-22.04-arm
+          - os: macos-26
+          - os: macos-15
+          - os: windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable
+      - name: Install build dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: sudo apt-get update && sudo apt-get install -y build-essential meson ninja-build nasm
+      - name: Install build dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: brew install meson nasm
+      - name: Install build dependencies (Windows)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          pip install meson
+          choco install ninja nasm -y
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.os }}
+          toolchain: stable
+      - run: cargo test --features source-build
+
+      # シンボル書き換え確認: 全定義済みシンボルが shiguredo_dav1d_ プレフィックス付きであること
+      - name: Verify symbol rewriting
+        shell: bash
+        run: |
+          # meson はビルド中間ディレクトリにも libdav1d.a を残すため、
+          # シンボル書き換え済みのインストール先 (out/build/dav1d/build/src/) のみを検索する
+          LIB_PATH=$(find target/debug/build -path '*/out/build/dav1d/build/src/libdav1d.a' -o -path '*/out/build/dav1d/build/src/dav1d.lib' | head -1)
+          if [ -z "$LIB_PATH" ]; then
+            echo "::error::static library not found"
+            exit 1
+          fi
+
+          SYSROOT=$(rustc --print sysroot)
+          TARGET=$(rustc -vV | sed -n 's/^host: //p')
+          LLVM_NM="$SYSROOT/lib/rustlib/$TARGET/bin/llvm-nm"
+          if [ ! -f "$LLVM_NM" ]; then
+            LLVM_NM="$SYSROOT/lib/rustlib/$TARGET/bin/llvm-nm.exe"
+          fi
+
+          # 定義済み外部シンボルのうち shiguredo_dav1d_ プレフィックスが付いていないものを検出する
+          # macOS では先頭 _ を除去して判定する
+          # --format=just-symbols はオブジェクトファイル名も出力するため、
+          # シンボル名のみをフィルタリングする（.c.o: などは末尾に : が付くため除外される）
+          # NASM 生成シンボルは . を含む場合がある (例: dav1d_cdef_dir_8bpc_avx2.main)
+          VIOLATIONS=$("$LLVM_NM" --defined-only --extern-only --format=just-symbols "$LIB_PATH" \
+            | sed 's/^_//' \
+            | grep -E '^[a-zA-Z_][a-zA-Z0-9_.]*$' \
+            | grep -v '^shiguredo_dav1d_' \
+            || true)
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::symbols without shiguredo_dav1d_ prefix found:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "All symbols correctly prefixed with shiguredo_dav1d_"
+
+  # docs.rs 向けビルド確認
+  docs-rs:
+    name: docs.rs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DOCS_RS: 1
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable
+      - run: cargo doc --no-deps
+
+  slack_notify:
+    needs:
+      - fmt-clippy
+      - test
+      - docs-rs
+    runs-on: ubuntu-slim
+    if: always()
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Slack Notification
+        uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          slack_channel: rust-oss
+          notify_mode: failure_and_fixed
+        env:
+          GH_TOKEN: ${{ github.token }}

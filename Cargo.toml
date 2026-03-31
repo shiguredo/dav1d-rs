@@ -1,0 +1,31 @@
+[package]
+name = "shiguredo_dav1d"
+version = "2026.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Shiguredo Inc."]
+license = "Apache-2.0"
+description = "Rust bindings for dav1d AV1 decoder"
+homepage = "https://github.com/shiguredo/dav1d-rs"
+repository = "https://github.com/shiguredo/dav1d-rs"
+readme = "README.md"
+build = "build.rs"
+include = ["/src/**/*", "/build.rs", "/README.md", "/LICENSE"]
+
+[features]
+source-build = []
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.72"
+shiguredo_toml = "2026.1"
+
+[dev-dependencies]
+shiguredo_aom = "2026.1.0"
+shiguredo_svt_av1 = "2026.1.0"
+
+# 以降は外部ライブラリビルド用のメタデータ
+# (この内容は build.rs の中からのみ参照される)
+[package.metadata.external-dependencies]
+dav1d = { url = "https://github.com/videolan/dav1d", version = "1.5.3" }
