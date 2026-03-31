@@ -22,8 +22,8 @@ bindgen = "0.72"
 shiguredo_toml = "2026.1"
 
 [dev-dependencies]
-shiguredo_aom = "2026.1.0-canary.0"
-shiguredo_svt_av1 = "2026.1.0-canary.2"
+shiguredo_aom = "2026.1.0"
+shiguredo_svt_av1 = "2026.1.0-canary.3"
 
 # 以降は外部ライブラリビルド用のメタデータ
 # (この内容は build.rs の中からのみ参照される)
