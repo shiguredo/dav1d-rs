@@ -11,6 +11,13 @@
 
 ## develop
 
+### misc
+
+
+## 2026.1.0
+
+**リリース日**: 2026-03-31
+
 - [UPDATE] dav1d を 1.5.1 から 1.5.3 に更新する
   - @voluntas
 - [ADD] `PixelLayout` enum を追加する (I400, I420, I422, I444)
