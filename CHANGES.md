@@ -11,27 +11,12 @@
 
 ## develop
 
-- [ADD] `PixelLayout` に `Reserved` バリアントを追加する
-  - FFI 境界で未知のピクセルレイアウト値を受け取った場合のフォールバック
-  - @voluntas
-- [ADD] `FrameType` に `Unknown` バリアントを追加する
-  - FFI 境界で未知のフレーム種別値を受け取った場合のフォールバック
-  - @voluntas
-- [CHANGE] `DecodedFrame` のメタデータアクセサの戻り値を `Option` に変更する
-  - `frame_type()`, `temporal_id()`, `spatial_id()`, `show_frame()`,
-    `color_primaries()`, `transfer_characteristics()`, `matrix_coefficients()`,
-    `chroma_sample_position()`, `color_range()`, `profile()` が対象
-  - FFI 内部ポインタが null の場合に panic せず `None` を返すようにする
-  - @voluntas
-- [FIX] プレーンアクセサで `from_raw_parts` 前に null ポインタチェックを追加する
-  - UB を panic に落として安全性を確保する
-  - @voluntas
-- [FIX] FFI 境界の列挙値変換で `unreachable!` の代わりにフォールバック値を使用する
-  - `parse_sequence_header()` の未知 hbd 値はエラーを返すようにする
-  - @voluntas
 - [UPDATE] dav1d を 1.5.1 から 1.5.3 に更新する
   - @voluntas
 - [ADD] `PixelLayout` enum を追加する (I400, I420, I422, I444)
+  - @voluntas
+- [ADD] `PixelLayout` に `Reserved` バリアントを追加する
+  - FFI 境界で未知のピクセルレイアウト値を受け取った場合のフォールバック
   - @voluntas
 - [ADD] `DecodedFrame::pixel_layout()` でフレームのピクセルレイアウトを取得できるようにする
   - @voluntas
@@ -59,6 +44,9 @@
 - [ADD] `ColorRange` enum を追加する (Studio / Full)
   - @voluntas
 - [ADD] `FrameType` enum を追加する (Key, Inter, Intra, Switch)
+  - @voluntas
+- [ADD] `FrameType` に `Unknown` バリアントを追加する
+  - FFI 境界で未知のフレーム種別値を受け取った場合のフォールバック
   - @voluntas
 - [ADD] `DecodedFrame::frame_type()` でフレーム種別を取得できるようにする
   - @voluntas
@@ -111,6 +99,12 @@
   - @voluntas
 - [ADD] `Error::is_eagain()` で EAGAIN エラーの判定ができるようにする
   - @voluntas
+- [CHANGE] `DecodedFrame` のメタデータアクセサの戻り値を `Option` に変更する
+  - `frame_type()`, `temporal_id()`, `spatial_id()`, `show_frame()`,
+    `color_primaries()`, `transfer_characteristics()`, `matrix_coefficients()`,
+    `chroma_sample_position()`, `color_range()`, `profile()` が対象
+  - FFI 内部ポインタが null の場合に panic せず `None` を返すようにする
+  - @voluntas
 - [CHANGE] `SequenceHeader` の `hbd` フィールドを `bit_depth` に変更する
   - dav1d 内部のインデックス値 (0, 1, 2) ではなく実際のビット深度 (8, 10, 12) を格納する
   - @voluntas
@@ -120,6 +114,12 @@
 - [CHANGE] `DecodedFrame` の I420 固定の制約を除去する
   - I400, I420, I422, I444 の全ピクセルレイアウトに対応する
   - `u_plane()` / `v_plane()` は I400 の場合に空のスライスを返す
+  - @voluntas
+- [FIX] プレーンアクセサで `from_raw_parts` 前に null ポインタチェックを追加する
+  - UB を panic に落として安全性を確保する
+  - @voluntas
+- [FIX] FFI 境界の列挙値変換で `unreachable!` の代わりにフォールバック値を使用する
+  - `parse_sequence_header()` の未知 hbd 値はエラーを返すようにする
   - @voluntas
 
 ### misc
