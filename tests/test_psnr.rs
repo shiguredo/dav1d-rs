@@ -166,13 +166,13 @@ fn encode_with_aom(
         let image = shiguredo_aom::ImageData::I420 { y, u, v };
         encoder.encode(&image, &options).expect("failed to encode");
         while let Some(encoded) = encoder.next_frame() {
-            packets.push(encoded.data().to_vec());
+            packets.push(encoded.data().expect("failed to get encoded data").to_vec());
         }
     }
 
     encoder.finish().expect("failed to finish");
     while let Some(encoded) = encoder.next_frame() {
-        packets.push(encoded.data().to_vec());
+        packets.push(encoded.data().expect("failed to get encoded data").to_vec());
     }
 
     packets
