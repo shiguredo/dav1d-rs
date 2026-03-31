@@ -11,6 +11,24 @@
 
 ## develop
 
+- [ADD] `PixelLayout` に `Reserved` バリアントを追加する
+  - FFI 境界で未知のピクセルレイアウト値を受け取った場合のフォールバック
+  - @voluntas
+- [ADD] `FrameType` に `Unknown` バリアントを追加する
+  - FFI 境界で未知のフレーム種別値を受け取った場合のフォールバック
+  - @voluntas
+- [CHANGE] `DecodedFrame` のメタデータアクセサの戻り値を `Option` に変更する
+  - `frame_type()`, `temporal_id()`, `spatial_id()`, `show_frame()`,
+    `color_primaries()`, `transfer_characteristics()`, `matrix_coefficients()`,
+    `chroma_sample_position()`, `color_range()`, `profile()` が対象
+  - FFI 内部ポインタが null の場合に panic せず `None` を返すようにする
+  - @voluntas
+- [FIX] プレーンアクセサで `from_raw_parts` 前に null ポインタチェックを追加する
+  - UB を panic に落として安全性を確保する
+  - @voluntas
+- [FIX] FFI 境界の列挙値変換で `unreachable!` の代わりにフォールバック値を使用する
+  - `parse_sequence_header()` の未知 hbd 値はエラーを返すようにする
+  - @voluntas
 - [UPDATE] dav1d を 1.5.1 から 1.5.3 に更新する
   - @voluntas
 - [ADD] `PixelLayout` enum を追加する (I400, I420, I422, I444)

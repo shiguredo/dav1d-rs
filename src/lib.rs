@@ -90,6 +90,8 @@ pub enum PixelLayout {
     I422,
     /// YUV 4:4:4
     I444,
+    /// 予約済み / 未対応の値
+    Reserved,
 }
 
 /// 色域 (H.273 準拠)
@@ -347,7 +349,7 @@ pub fn parse_sequence_header(data: &[u8]) -> Result<SequenceHeader, Error> {
             sys::Dav1dPixelLayout_DAV1D_PIXEL_LAYOUT_I420 => PixelLayout::I420,
             sys::Dav1dPixelLayout_DAV1D_PIXEL_LAYOUT_I422 => PixelLayout::I422,
             sys::Dav1dPixelLayout_DAV1D_PIXEL_LAYOUT_I444 => PixelLayout::I444,
-            _ => unreachable!("unknown pixel layout: {}", seq_hdr.layout),
+            _ => PixelLayout::Reserved,
         };
         Ok(SequenceHeader {
             profile: seq_hdr.profile,
@@ -362,7 +364,12 @@ pub fn parse_sequence_header(data: &[u8]) -> Result<SequenceHeader, Error> {
                 0 => 8,
                 1 => 10,
                 2 => 12,
-                _ => unreachable!("unknown hbd value: {}", seq_hdr.hbd),
+                _ => {
+                    return Err(Error {
+                        code: -1,
+                        function: "parse_sequence_header",
+                    });
+                }
             },
             color_range: ColorRange::from_raw(seq_hdr.color_range),
         })
@@ -415,6 +422,8 @@ pub enum FrameType {
     Intra,
     /// スイッチフレーム
     Switch,
+    /// 未知のフレーム種別
+    Unknown,
 }
 
 impl FrameType {
@@ -424,7 +433,7 @@ impl FrameType {
             sys::Dav1dFrameType_DAV1D_FRAME_TYPE_INTER => Self::Inter,
             sys::Dav1dFrameType_DAV1D_FRAME_TYPE_INTRA => Self::Intra,
             sys::Dav1dFrameType_DAV1D_FRAME_TYPE_SWITCH => Self::Switch,
-            _ => unreachable!("unknown frame type: {raw}"),
+            _ => Self::Unknown,
         }
     }
 }
@@ -753,7 +762,7 @@ impl DecodedFrame {
             sys::Dav1dPixelLayout_DAV1D_PIXEL_LAYOUT_I420 => PixelLayout::I420,
             sys::Dav1dPixelLayout_DAV1D_PIXEL_LAYOUT_I422 => PixelLayout::I422,
             sys::Dav1dPixelLayout_DAV1D_PIXEL_LAYOUT_I444 => PixelLayout::I444,
-            _ => unreachable!("unknown pixel layout: {}", self.0.p.layout),
+            _ => PixelLayout::Reserved,
         }
     }
 
@@ -773,13 +782,13 @@ impl DecodedFrame {
     /// ストライドはバイト単位なのでハイビット深度でも既に考慮済み。
     /// 返されるスライスの長さは `height * stride` バイトで、各行末のパディングを含む
     pub fn y_plane(&self) -> &[u8] {
+        let ptr = self.0.data[0];
+        assert!(!ptr.is_null(), "y_plane data pointer is null");
         // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する。
-        // aligned_height >= height なので height * stride は常に有効な範囲内
+        // aligned_height >= height なので height * stride は常に有効な範囲内。
+        // 非 null は上の assert で検証済み
         unsafe {
-            std::slice::from_raw_parts(
-                self.0.data[0].cast_const().cast(),
-                self.height() * self.y_stride(),
-            )
+            std::slice::from_raw_parts(ptr.cast_const().cast(), self.height() * self.y_stride())
         }
     }
 
@@ -789,13 +798,19 @@ impl DecodedFrame {
     /// ピクセルレイアウトが [`PixelLayout::I400`] の場合は空のスライスを返す。
     /// 返されるスライスの長さは `chroma_height * stride` バイトで、各行末のパディングを含む
     pub fn u_plane(&self) -> &[u8] {
-        if self.pixel_layout() == PixelLayout::I400 {
+        if matches!(
+            self.pixel_layout(),
+            PixelLayout::I400 | PixelLayout::Reserved
+        ) {
             return &[];
         }
-        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する
+        let ptr = self.0.data[1];
+        assert!(!ptr.is_null(), "u_plane data pointer is null");
+        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する。
+        // 非 null は上の assert で検証済み
         unsafe {
             std::slice::from_raw_parts(
-                self.0.data[1].cast_const().cast(),
+                ptr.cast_const().cast(),
                 self.chroma_height() * self.u_stride(),
             )
         }
@@ -807,13 +822,19 @@ impl DecodedFrame {
     /// ピクセルレイアウトが [`PixelLayout::I400`] の場合は空のスライスを返す。
     /// 返されるスライスの長さは `chroma_height * stride` バイトで、各行末のパディングを含む
     pub fn v_plane(&self) -> &[u8] {
-        if self.pixel_layout() == PixelLayout::I400 {
+        if matches!(
+            self.pixel_layout(),
+            PixelLayout::I400 | PixelLayout::Reserved
+        ) {
             return &[];
         }
-        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する
+        let ptr = self.0.data[2];
+        assert!(!ptr.is_null(), "v_plane data pointer is null");
+        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する。
+        // 非 null は上の assert で検証済み
         unsafe {
             std::slice::from_raw_parts(
-                self.0.data[2].cast_const().cast(),
+                ptr.cast_const().cast(),
                 self.chroma_height() * self.v_stride(),
             )
         }
@@ -827,10 +848,13 @@ impl DecodedFrame {
         if !self.is_high_depth() {
             return None;
         }
-        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する
+        let ptr = self.0.data[0];
+        assert!(!ptr.is_null(), "y_plane data pointer is null");
+        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する。
+        // 非 null は上の assert で検証済み
         unsafe {
             Some(std::slice::from_raw_parts(
-                self.0.data[0].cast_const().cast(),
+                ptr.cast_const().cast(),
                 self.height() * self.y_stride() / 2,
             ))
         }
@@ -841,13 +865,21 @@ impl DecodedFrame {
     /// ビット深度が 8 の場合、またはピクセルレイアウトが [`PixelLayout::I400`] の場合は `None` を返す。
     /// 返されるスライスの長さは `chroma_height * (stride / 2)` 要素で、各行末のパディングを含む
     pub fn u_plane_u16(&self) -> Option<&[u16]> {
-        if !self.is_high_depth() || self.pixel_layout() == PixelLayout::I400 {
+        if !self.is_high_depth()
+            || matches!(
+                self.pixel_layout(),
+                PixelLayout::I400 | PixelLayout::Reserved
+            )
+        {
             return None;
         }
-        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する
+        let ptr = self.0.data[1];
+        assert!(!ptr.is_null(), "u_plane data pointer is null");
+        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する。
+        // 非 null は上の assert で検証済み
         unsafe {
             Some(std::slice::from_raw_parts(
-                self.0.data[1].cast_const().cast(),
+                ptr.cast_const().cast(),
                 self.chroma_height() * self.u_stride() / 2,
             ))
         }
@@ -858,13 +890,21 @@ impl DecodedFrame {
     /// ビット深度が 8 の場合、またはピクセルレイアウトが [`PixelLayout::I400`] の場合は `None` を返す。
     /// 返されるスライスの長さは `chroma_height * (stride / 2)` 要素で、各行末のパディングを含む
     pub fn v_plane_u16(&self) -> Option<&[u16]> {
-        if !self.is_high_depth() || self.pixel_layout() == PixelLayout::I400 {
+        if !self.is_high_depth()
+            || matches!(
+                self.pixel_layout(),
+                PixelLayout::I400 | PixelLayout::Reserved
+            )
+        {
             return None;
         }
-        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する
+        let ptr = self.0.data[2];
+        assert!(!ptr.is_null(), "v_plane data pointer is null");
+        // SAFETY: dav1d のデフォルトアロケータは stride * aligned_height バイトを確保する。
+        // 非 null は上の assert で検証済み
         unsafe {
             Some(std::slice::from_raw_parts(
-                self.0.data[2].cast_const().cast(),
+                ptr.cast_const().cast(),
                 self.chroma_height() * self.v_stride() / 2,
             ))
         }
@@ -918,112 +958,102 @@ impl DecodedFrame {
 
     /// フレーム種別を返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のフレームヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn frame_type(&self) -> FrameType {
-        assert!(!self.0.frame_hdr.is_null(), "frame_hdr is null");
-        unsafe { FrameType::from_raw((*self.0.frame_hdr).frame_type) }
+    /// dav1d 内部のフレームヘッダーが存在しない場合は `None` を返す
+    pub fn frame_type(&self) -> Option<FrameType> {
+        if self.0.frame_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { FrameType::from_raw((*self.0.frame_hdr).frame_type) })
     }
 
     /// SVC 用テンポラル ID を返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のフレームヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn temporal_id(&self) -> u8 {
-        assert!(!self.0.frame_hdr.is_null(), "frame_hdr is null");
-        unsafe { (*self.0.frame_hdr).temporal_id }
+    /// dav1d 内部のフレームヘッダーが存在しない場合は `None` を返す
+    pub fn temporal_id(&self) -> Option<u8> {
+        if self.0.frame_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { (*self.0.frame_hdr).temporal_id })
     }
 
     /// SVC 用スパーシャル ID を返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のフレームヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn spatial_id(&self) -> u8 {
-        assert!(!self.0.frame_hdr.is_null(), "frame_hdr is null");
-        unsafe { (*self.0.frame_hdr).spatial_id }
+    /// dav1d 内部のフレームヘッダーが存在しない場合は `None` を返す
+    pub fn spatial_id(&self) -> Option<u8> {
+        if self.0.frame_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { (*self.0.frame_hdr).spatial_id })
     }
 
     /// 表示フレームかどうかを返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のフレームヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn show_frame(&self) -> bool {
-        assert!(!self.0.frame_hdr.is_null(), "frame_hdr is null");
-        unsafe { (*self.0.frame_hdr).show_frame != 0 }
+    /// dav1d 内部のフレームヘッダーが存在しない場合は `None` を返す
+    pub fn show_frame(&self) -> Option<bool> {
+        if self.0.frame_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { (*self.0.frame_hdr).show_frame != 0 })
     }
 
     /// 色域を返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のシーケンスヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn color_primaries(&self) -> ColorPrimaries {
-        assert!(!self.0.seq_hdr.is_null(), "seq_hdr is null");
-        unsafe { ColorPrimaries::from_raw((*self.0.seq_hdr).pri) }
+    /// dav1d 内部のシーケンスヘッダーが存在しない場合は `None` を返す
+    pub fn color_primaries(&self) -> Option<ColorPrimaries> {
+        if self.0.seq_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { ColorPrimaries::from_raw((*self.0.seq_hdr).pri) })
     }
 
     /// 伝達特性を返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のシーケンスヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn transfer_characteristics(&self) -> TransferCharacteristics {
-        assert!(!self.0.seq_hdr.is_null(), "seq_hdr is null");
-        unsafe { TransferCharacteristics::from_raw((*self.0.seq_hdr).trc) }
+    /// dav1d 内部のシーケンスヘッダーが存在しない場合は `None` を返す
+    pub fn transfer_characteristics(&self) -> Option<TransferCharacteristics> {
+        if self.0.seq_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { TransferCharacteristics::from_raw((*self.0.seq_hdr).trc) })
     }
 
     /// 行列係数を返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のシーケンスヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn matrix_coefficients(&self) -> MatrixCoefficients {
-        assert!(!self.0.seq_hdr.is_null(), "seq_hdr is null");
-        unsafe { MatrixCoefficients::from_raw((*self.0.seq_hdr).mtrx) }
+    /// dav1d 内部のシーケンスヘッダーが存在しない場合は `None` を返す
+    pub fn matrix_coefficients(&self) -> Option<MatrixCoefficients> {
+        if self.0.seq_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { MatrixCoefficients::from_raw((*self.0.seq_hdr).mtrx) })
     }
 
     /// クロマサンプル位置を返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のシーケンスヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn chroma_sample_position(&self) -> ChromaSamplePosition {
-        assert!(!self.0.seq_hdr.is_null(), "seq_hdr is null");
-        unsafe { ChromaSamplePosition::from_raw((*self.0.seq_hdr).chr) }
+    /// dav1d 内部のシーケンスヘッダーが存在しない場合は `None` を返す
+    pub fn chroma_sample_position(&self) -> Option<ChromaSamplePosition> {
+        if self.0.seq_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { ChromaSamplePosition::from_raw((*self.0.seq_hdr).chr) })
     }
 
     /// 色域レンジを返す
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のシーケンスヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn color_range(&self) -> ColorRange {
-        assert!(!self.0.seq_hdr.is_null(), "seq_hdr is null");
-        unsafe { ColorRange::from_raw((*self.0.seq_hdr).color_range) }
+    /// dav1d 内部のシーケンスヘッダーが存在しない場合は `None` を返す
+    pub fn color_range(&self) -> Option<ColorRange> {
+        if self.0.seq_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { ColorRange::from_raw((*self.0.seq_hdr).color_range) })
     }
 
     /// AV1 プロファイルを返す (0, 1, 2)
     ///
-    /// # Panics
-    ///
-    /// dav1d 内部のシーケンスヘッダーポインタが null の場合にパニックする。
-    /// [`Decoder::next_frame()`] から取得したフレームでは発生しない
-    pub fn profile(&self) -> u8 {
-        assert!(!self.0.seq_hdr.is_null(), "seq_hdr is null");
-        unsafe { (*self.0.seq_hdr).profile }
+    /// dav1d 内部のシーケンスヘッダーが存在しない場合は `None` を返す
+    pub fn profile(&self) -> Option<u8> {
+        if self.0.seq_hdr.is_null() {
+            return None;
+        }
+        Some(unsafe { (*self.0.seq_hdr).profile })
     }
 
     /// コンテンツライトレベルを返す (HDR メタデータ)
@@ -1063,7 +1093,7 @@ impl DecodedFrame {
     /// クロマ成分の高さを返す
     fn chroma_height(&self) -> usize {
         match self.pixel_layout() {
-            PixelLayout::I400 => 0,
+            PixelLayout::I400 | PixelLayout::Reserved => 0,
             PixelLayout::I420 => self.height().div_ceil(2),
             PixelLayout::I422 | PixelLayout::I444 => self.height(),
         }
@@ -1136,9 +1166,9 @@ mod tests {
             assert!(!frame.y_plane().is_empty());
             assert!(!frame.u_plane().is_empty());
             assert!(!frame.v_plane().is_empty());
-            assert_eq!(frame.frame_type(), FrameType::Key);
-            assert!(frame.show_frame());
-            assert_eq!(frame.profile(), 0);
+            assert_eq!(frame.frame_type(), Some(FrameType::Key));
+            assert_eq!(frame.show_frame(), Some(true));
+            assert_eq!(frame.profile(), Some(0));
             count += 1;
         }
 
