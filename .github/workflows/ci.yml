@@ -41,8 +41,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-26.04
-          - os: ubuntu-26.04-arm
+          # dev-dependencies の shiguredo_aom / shiguredo_svt_av1 が
+          # ubuntu-26.04 用 prebuilt を提供していないため一時的に無効化する
+          # 依存先が ubuntu-26.04 対応した後に有効化する
+          # - os: ubuntu-26.04
+          # - os: ubuntu-26.04-arm
           - os: ubuntu-24.04
           - os: ubuntu-24.04-arm
           - os: ubuntu-22.04
