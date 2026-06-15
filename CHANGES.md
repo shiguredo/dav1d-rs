@@ -13,6 +13,8 @@
 
 ### misc
 
+- GitHub Actions の CI に ubuntu-26.04 と ubuntu-26.04-arm を追加する
+  - @voluntas
 
 ## 2026.1.0
 
