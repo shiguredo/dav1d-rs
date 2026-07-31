@@ -41,11 +41,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # dev-dependencies の shiguredo_aom / shiguredo_svt_av1 が
-          # ubuntu-26.04 用 prebuilt を提供していないため一時的に無効化する
-          # 依存先が ubuntu-26.04 対応した後に有効化する
-          # - os: ubuntu-26.04
-          # - os: ubuntu-26.04-arm
+          - os: ubuntu-26.04
+          - os: ubuntu-26.04-arm
           - os: ubuntu-24.04
           - os: ubuntu-24.04-arm
           - os: ubuntu-22.04
@@ -74,7 +71,9 @@ jobs:
         with:
           os: ${{ matrix.os }}
           toolchain: stable
-      - run: cargo test --features source-build
+      # shiguredo_aom / shiguredo_svt_av1 は ubuntu-26.04 用の安定版 prebuilt が
+      # 揃っていないため、CI では常に source-build でビルドする
+      - run: cargo test --features source-build -F shiguredo_aom/source-build -F shiguredo_svt_av1/source-build
 
       # シンボル書き換え確認: 全定義済みシンボルが shiguredo_dav1d_ プレフィックス付きであること
       - name: Verify symbol rewriting

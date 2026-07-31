@@ -11,6 +11,9 @@
 
 ## develop
 
+- [ADD] ubuntu-26.04 / ubuntu-26.04-arm の prebuilt バイナリをサポートする
+  - @voluntas
+
 ### misc
 
 - [ADD] GitHub Actions の CI に ubuntu-26.04 と ubuntu-26.04-arm を追加する
