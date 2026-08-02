@@ -336,7 +336,11 @@ pub struct SequenceHeader {
 /// ビットストリームからシーケンスヘッダーを解析する
 ///
 /// デコーダーを開かずにストリームのメタデータを事前に取得できる。
-/// シーケンスヘッダー以外の OBU が含まれていても無視される
+/// シーケンスヘッダー以外の OBU が含まれていても無視される。
+/// シーケンスヘッダー OBU が複数ある場合は最後の 1 つだけが返る。
+///
+/// シーケンスヘッダーが含まれていない場合は ENOENT エラー、
+/// 空のデータの場合は EINVAL エラーが返る
 pub fn parse_sequence_header(data: &[u8]) -> Result<SequenceHeader, Error> {
     let mut seq_hdr = MaybeUninit::<sys::Dav1dSequenceHeader>::zeroed();
     unsafe {
@@ -476,6 +480,9 @@ pub struct EventFlags(sys::Dav1dEventFlags);
 
 impl EventFlags {
     /// 新しいシーケンスヘッダーが検出された
+    ///
+    /// 最後に返されたピクチャに紐づくフラグであり、
+    /// `Decoder::flush()` 直後のピクチャにも立つ
     pub const NEW_SEQUENCE: Self = Self(sys::Dav1dEventFlags_DAV1D_EVENT_FLAG_NEW_SEQUENCE);
     /// 現在のシーケンスで新しいオペレーティングパラメータが検出された
     pub const NEW_OP_PARAMS_INFO: Self =
@@ -494,7 +501,7 @@ pub enum DecodeFrameType {
     All,
     /// 参照フレームのみ
     Reference,
-    /// イントラフレームのみ
+    /// イントラフレームのみ (キーフレームを含む)
     Intra,
     /// キーフレームのみ
     Key,
@@ -514,9 +521,9 @@ impl DecodeFrameType {
 /// デコーダーの設定
 #[derive(Debug, Clone)]
 pub struct DecoderConfig {
-    /// デコードに使用するスレッド数
+    /// デコードに使用するスレッド数 (0 で論理コア数による自動決定)
     pub n_threads: usize,
-    /// 最大フレーム遅延 (0 で dav1d が自動決定)
+    /// 最大フレーム遅延 (0 で `ceil(sqrt(n_threads))`、1 で低遅延デコード)
     pub max_frame_delay: usize,
     /// フィルムグレインを適用するかどうか
     pub apply_grain: bool,
@@ -526,9 +533,12 @@ pub struct DecoderConfig {
     pub all_layers: bool,
     /// 最大フレームサイズ制限 (ピクセル単位、None で無制限)
     pub frame_size_limit: Option<u32>,
-    /// ビットストリーム規格違反時にデコードを中断するか
+    /// ビットストリームのデコードに影響しない規格違反
+    /// (不整合・無効なメタデータ等) のときにデコードを中断するか
     pub strict_std_compliance: bool,
-    /// 非表示フレームも出力するか
+    /// 非表示フレームも符号化順で出力するか
+    ///
+    /// show-existing-frame により同じフレームが 2 回出力されうる
     pub output_invisible_frames: bool,
     /// 有効にするインループフィルター
     pub inloop_filters: InloopFilterType,
@@ -557,7 +567,8 @@ impl DecoderConfig {
 
     /// この設定でのデコーダーのフレーム遅延を取得する
     ///
-    /// 戻り値は 1 以上 `max_frame_delay` 以下であることが保証される
+    /// 戻り値は 1 以上であることが保証される。
+    /// `max_frame_delay` が 0 のときは dav1d が自動決定した値 (1 〜 8) が返る
     pub fn frame_delay(&self) -> Result<usize, Error> {
         let mut settings = MaybeUninit::<sys::Dav1dSettings>::zeroed();
         unsafe {
@@ -626,8 +637,14 @@ impl Decoder {
     ///
     /// 空のデータ (`data.is_empty()`) を渡した場合は何もせず `Ok(())` を返す。
     ///
-    /// dav1d の内部バッファが満杯の場合はエラー (EAGAIN) を返す。
-    /// その場合は先に [`Decoder::next_frame()`] でフレームを取り出してから再度呼び出すこと
+    /// dav1d の内部バッファに未消費のデータが残っている場合はエラー (EAGAIN) を返す。
+    /// **EAGAIN が返された時点で渡したデータは破棄される**ため、
+    /// 先に [`Decoder::next_frame()`] でフレームを取り出し、
+    /// 同じデータを保持して再度呼び出すこと。
+    ///
+    /// また、EAGAIN 以外のエラー (ENOMEM 等) が返された場合もデータは破棄される。
+    /// フレームが完成した時点で残りのデータは dav1d の内部バッファに保持され、
+    /// 次の [`Decoder::decode()`] の前に [`Decoder::next_frame()`] を呼ぶ必要がある
     pub fn decode(&mut self, data: &[u8]) -> Result<(), Error> {
         if data.is_empty() {
             return Ok(());
@@ -675,18 +692,26 @@ impl Decoder {
     }
 
     /// 最後のデコードエラーに関連するデータプロパティを取得する
+    ///
+    /// dav1d の所有権契約では、成功時に返された参照の所有権が呼び出し側に
+    /// 移る。ここではフィールドをコピーして返すため、取得後に
+    /// dav1d_data_props_unref() で解放する。
     pub fn get_decode_error_data_props(&mut self) -> Result<DataProps, Error> {
         let mut props = MaybeUninit::<sys::Dav1dDataProps>::zeroed();
         unsafe {
             let code = sys::dav1d_get_decode_error_data_props(self.ctx, props.as_mut_ptr());
             Error::check(code, "dav1d_get_decode_error_data_props")?;
-            let props = props.assume_init();
-            Ok(DataProps {
+            let mut props = props.assume_init();
+            let data_props = DataProps {
                 timestamp: props.timestamp,
                 duration: props.duration,
                 offset: props.offset,
                 size: props.size,
-            })
+            };
+            // 返された参照の所有権を解放する
+            // (dav1d_data_props_unref は props を memset して初期状態に戻す)
+            sys::dav1d_data_props_unref(&mut props);
+            Ok(data_props)
         }
     }
 
@@ -694,7 +719,12 @@ impl Decoder {
     ///
     /// `DecoderConfig::apply_grain` が `false` の場合に、
     /// 選択したフレームだけに後からグレインを適用できる。
-    /// フレームにグレインメタデータがない場合は新しい参照を返す
+    /// フレームにグレインメタデータがない場合は新しい参照を返す。
+    ///
+    /// `DecoderConfig::apply_grain` が `true` (デフォルト) の場合、
+    /// `Decoder::next_frame()` で既にグレインが適用済みのため、
+    /// この関数を呼ぶとグレインが二重適用される。
+    /// 二重適用を避けるには `DecoderConfig::apply_grain` を `false` に設定すること
     pub fn apply_grain(&mut self, frame: &DecodedFrame) -> Result<DecodedFrame, Error> {
         let mut out = MaybeUninit::<sys::Dav1dPicture>::zeroed();
         unsafe {
@@ -708,7 +738,13 @@ impl Decoder {
     ///
     /// ストリーム内でシークした後に呼び出すことで、
     /// デコーダーを新しい位置からのデコードに備えさせる。
-    /// 未消費のデータやバッファ中のフレームは全て破棄される
+    /// 未消費のデータやバッファ中のフレームは全て破棄される。
+    ///
+    /// flush 後に生成された最初のピクチャには
+    /// 新しいシーケンスヘッダーが検出されたことを示す
+    /// [`EventFlags::NEW_SEQUENCE`] フラグが立つ。
+    /// また、デコードを再開するには新しいシーケンスヘッダーを含む
+    /// データを再度 [`Decoder::decode()`] に渡す必要がある
     pub fn flush(&mut self) {
         unsafe {
             sys::dav1d_flush(self.ctx);
@@ -778,7 +814,8 @@ impl DecodedFrame {
 
     /// フレームの Y 成分のデータを返す
     ///
-    /// ハイビット深度の場合は 1 ピクセルあたり 2 バイト (リトルエンディアン) になる。
+    /// ハイビット深度の場合は 1 ピクセルあたり 2 バイトになり、
+    /// ピクセルは LSB ビットに配置される。
     /// ストライドはバイト単位なのでハイビット深度でも既に考慮済み。
     /// 返されるスライスの長さは `height * stride` バイトで、各行末のパディングを含む
     pub fn y_plane(&self) -> &[u8] {
@@ -794,7 +831,8 @@ impl DecodedFrame {
 
     /// フレームの U 成分のデータを返す
     ///
-    /// ハイビット深度の場合は 1 ピクセルあたり 2 バイト (リトルエンディアン) になる。
+    /// ハイビット深度の場合は 1 ピクセルあたり 2 バイトになり、
+    /// ピクセルは LSB ビットに配置される。
     /// ピクセルレイアウトが [`PixelLayout::I400`] の場合は空のスライスを返す。
     /// 返されるスライスの長さは `chroma_height * stride` バイトで、各行末のパディングを含む
     pub fn u_plane(&self) -> &[u8] {
@@ -818,7 +856,8 @@ impl DecodedFrame {
 
     /// フレームの V 成分のデータを返す
     ///
-    /// ハイビット深度の場合は 1 ピクセルあたり 2 バイト (リトルエンディアン) になる。
+    /// ハイビット深度の場合は 1 ピクセルあたり 2 バイトになり、
+    /// ピクセルは LSB ビットに配置される。
     /// ピクセルレイアウトが [`PixelLayout::I400`] の場合は空のスライスを返す。
     /// 返されるスライスの長さは `chroma_height * stride` バイトで、各行末のパディングを含む
     pub fn v_plane(&self) -> &[u8] {
@@ -855,7 +894,7 @@ impl DecodedFrame {
         unsafe {
             Some(std::slice::from_raw_parts(
                 ptr.cast_const().cast(),
-                self.height() * self.y_stride() / 2,
+                self.height() * (self.y_stride() / 2),
             ))
         }
     }
@@ -880,7 +919,7 @@ impl DecodedFrame {
         unsafe {
             Some(std::slice::from_raw_parts(
                 ptr.cast_const().cast(),
-                self.chroma_height() * self.u_stride() / 2,
+                self.chroma_height() * (self.u_stride() / 2),
             ))
         }
     }
@@ -905,7 +944,7 @@ impl DecodedFrame {
         unsafe {
             Some(std::slice::from_raw_parts(
                 ptr.cast_const().cast(),
-                self.chroma_height() * self.v_stride() / 2,
+                self.chroma_height() * (self.v_stride() / 2),
             ))
         }
     }
@@ -942,6 +981,11 @@ impl DecodedFrame {
     ///
     /// [`PixelLayout::I400`] の場合でも dav1d の内部値が返されるが、
     /// クロマプレーン自体は存在しないため [`v_plane()`](Self::v_plane) は空のスライスを返す
+    ///
+    /// # Panics
+    ///
+    /// dav1d が負の stride を返した場合にパニックする。
+    /// dav1d のデフォルトアロケータでは発生しない
     pub fn v_stride(&self) -> usize {
         self.u_stride() // U と V は共通
     }
@@ -1123,16 +1167,42 @@ unsafe impl Sync for DecodedFrame {}
 mod tests {
     use super::*;
 
+    /// プレーンの有効画素 (パディングを除く) が全て指定値であることを検証する
+    fn assert_plane_value(plane: &[u8], stride: usize, width: usize, height: usize, value: u8) {
+        for row in 0..height {
+            assert!(
+                plane[row * stride..row * stride + width]
+                    .iter()
+                    .all(|&v| v == value),
+                "row {row} の画素値が {value} ではない"
+            );
+        }
+    }
+
     #[test]
     fn parse_seq_hdr() {
+        // 640x480 の黒フレーム (8-bit, I420, スタジオレンジ) のシーケンスヘッダー。
+        // 構成: シーケンスヘッダー OBU (11 バイト) + キーフレーム OBU (35 バイト)
         let data = [
             10, 11, 0, 0, 0, 36, 196, 255, 223, 63, 254, 96, 16, 50, 35, 16, 0, 144, 0, 0, 0, 160,
             0, 0, 128, 1, 197, 120, 80, 103, 179, 239, 241, 100, 76, 173, 116, 93, 183, 31, 101,
             221, 87, 90, 233, 219, 28, 199, 243, 128,
         ];
-        let hdr = parse_sequence_header(&data).expect("parse error");
+        let hdr = parse_sequence_header(&data).expect("シーケンスヘッダーのパースに失敗");
         assert_eq!(hdr.profile, 0);
         assert_eq!(hdr.layout, PixelLayout::I420);
+        assert_eq!(hdr.bit_depth, 8);
+        assert_eq!(hdr.max_width, 640);
+        assert_eq!(hdr.max_height, 480);
+        assert_eq!(hdr.color_range, ColorRange::Studio);
+    }
+
+    #[test]
+    fn parse_seq_hdr_errors() {
+        // 空データは EINVAL エラーになる
+        assert!(parse_sequence_header(&[]).is_err());
+        // シーケンスヘッダーを含まないデータは ENOENT エラーになる
+        assert!(parse_sequence_header(&[0x00, 0x01, 0x02]).is_err());
     }
 
     #[test]
@@ -1149,30 +1219,36 @@ mod tests {
 
     #[test]
     fn decode_black() {
+        // 640x480 の黒フレーム (Y=16, UV=128, スタジオレンジ) の AV1 ビットストリーム。
+        // 構成: シーケンスヘッダー OBU (11 バイト) + キーフレーム OBU (35 バイト)。
+        // 色域は Unknown (シーケンスヘッダーに色域情報がないため)
         let data = [
             10, 11, 0, 0, 0, 36, 196, 255, 223, 63, 254, 96, 16, 50, 35, 16, 0, 144, 0, 0, 0, 160,
             0, 0, 128, 1, 197, 120, 80, 103, 179, 239, 241, 100, 76, 173, 116, 93, 183, 31, 101,
             221, 87, 90, 233, 219, 28, 199, 243, 128,
         ];
         let config = DecoderConfig::new();
-        let mut decoder = Decoder::new(config).expect("new() error");
+        let mut decoder = Decoder::new(config).expect("デコーダーの生成に失敗");
         let mut count = 0;
 
-        decoder.decode(&data).expect("decode() error");
+        decoder.decode(&data).expect("デコードに失敗");
         while let Ok(Some(frame)) = decoder.next_frame() {
             assert_eq!(frame.pixel_layout(), PixelLayout::I420);
             assert_eq!(frame.bit_depth(), 8);
             assert!(!frame.is_high_depth());
-            assert!(!frame.y_plane().is_empty());
-            assert!(!frame.u_plane().is_empty());
-            assert!(!frame.v_plane().is_empty());
+            // 640x480 の黒画像であることを検証する
+            assert_eq!(frame.width(), 640);
+            assert_eq!(frame.height(), 480);
+            assert_plane_value(frame.y_plane(), frame.y_stride(), 640, 480, 16);
+            assert_plane_value(frame.u_plane(), frame.u_stride(), 320, 240, 128);
+            assert_plane_value(frame.v_plane(), frame.v_stride(), 320, 240, 128);
             assert_eq!(frame.frame_type(), Some(FrameType::Key));
             assert_eq!(frame.show_frame(), Some(true));
             assert_eq!(frame.profile(), Some(0));
             count += 1;
         }
 
-        decoder.finish().expect("finish() error");
+        decoder.finish().expect("finish に失敗");
         while let Ok(Some(_)) = decoder.next_frame() {
             count += 1;
         }
