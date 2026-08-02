@@ -77,10 +77,12 @@ priority = 0
 
 # --all-targets でテスト・example・ベンチも lint し、-D warnings で警告をエラーに昇格する
 # source-build feature で dav1d をソースからビルドした状態で検査する
+# --locked で Cargo.lock の自動更新を防ぐ (Cargo.lock が古いとコミットが失敗し、
+# 開発者は Cargo.lock を更新してからコミットすることになる)
 [[repos.hooks]]
 id = "cargo-clippy"
 name = "cargo clippy"
-entry = "cargo clippy --workspace --all-targets --features source-build -- -D warnings"
+entry = "cargo clippy --workspace --all-targets --features source-build --locked -- -D warnings"
 language = "system"
 types = ["rust"]
 pass_filenames = false
@@ -88,10 +90,11 @@ priority = 10
 
 # cargo test: コミットを遅くしないため pre-push でだけ実行する
 # source-build feature で dav1d をソースからビルドした状態で検査する
+# --locked で Cargo.lock の自動更新を防ぐ
 [[repos.hooks]]
 id = "cargo-test"
 name = "cargo test"
-entry = "cargo test --workspace --features source-build"
+entry = "cargo test --workspace --features source-build --locked"
 language = "system"
 types = ["rust"]
 pass_filenames = false
