@@ -129,17 +129,17 @@ fn extract_y_plane(frame: &shiguredo_dav1d::DecodedFrame) -> Vec<u8> {
 /// dav1d でデコードして (Y プレーン, 幅, 高さ) の一覧を返す
 fn decode_with_dav1d(packets: &[Vec<u8>]) -> Vec<(Vec<u8>, usize, usize)> {
     let config = DecoderConfig::new();
-    let mut decoder = Decoder::new(config).expect("failed to create dav1d decoder");
+    let mut decoder = Decoder::new(config).expect("dav1d デコーダーの生成に失敗");
     let mut decoded = Vec::new();
 
     for packet in packets {
-        decoder.decode(packet).expect("failed to decode");
+        decoder.decode(packet).expect("デコードに失敗");
         while let Ok(Some(frame)) = decoder.next_frame() {
             decoded.push((extract_y_plane(&frame), frame.width(), frame.height()));
         }
     }
 
-    decoder.finish().expect("failed to finish");
+    decoder.finish().expect("finish に失敗");
     while let Ok(Some(frame)) = decoder.next_frame() {
         decoded.push((extract_y_plane(&frame), frame.width(), frame.height()));
     }
@@ -156,7 +156,7 @@ fn encode_with_aom(
     config: shiguredo_aom::EncoderConfig,
     frames: &[(Vec<u8>, Vec<u8>, Vec<u8>)],
 ) -> Vec<Vec<u8>> {
-    let mut encoder = shiguredo_aom::Encoder::new(config).expect("failed to create aom encoder");
+    let mut encoder = shiguredo_aom::Encoder::new(config).expect("aom エンコーダーの生成に失敗");
     let options = shiguredo_aom::EncodeOptions {
         force_keyframe: false,
     };
@@ -164,15 +164,25 @@ fn encode_with_aom(
 
     for (y, u, v) in frames {
         let image = shiguredo_aom::ImageData::I420 { y, u, v };
-        encoder.encode(&image, &options).expect("failed to encode");
+        encoder.encode(&image, &options).expect("エンコードに失敗");
         while let Some(encoded) = encoder.next_frame() {
-            packets.push(encoded.data().expect("failed to get encoded data").to_vec());
+            packets.push(
+                encoded
+                    .data()
+                    .expect("エンコード済みデータの取得に失敗")
+                    .to_vec(),
+            );
         }
     }
 
-    encoder.finish().expect("failed to finish");
+    encoder.finish().expect("finish に失敗");
     while let Some(encoded) = encoder.next_frame() {
-        packets.push(encoded.data().expect("failed to get encoded data").to_vec());
+        packets.push(
+            encoded
+                .data()
+                .expect("エンコード済みデータの取得に失敗")
+                .to_vec(),
+        );
     }
 
     packets
@@ -193,23 +203,23 @@ fn roundtrip_colorbar_aom(
         .collect();
 
     let packets = encode_with_aom(config, &input_frames);
-    assert!(!packets.is_empty(), "no encoded packets");
+    assert!(!packets.is_empty(), "エンコードされたパケットが空");
 
     let decoded_frames = decode_with_dav1d(&packets);
     assert_eq!(
         decoded_frames.len(),
         num_frames,
-        "decoded {} frames, expected {num_frames}",
+        "デコードされたフレーム数 {}, 期待値 {num_frames}",
         decoded_frames.len()
     );
 
     for (i, (decoded_y, w, h)) in decoded_frames.iter().enumerate() {
-        assert_eq!(*w, width, "frame {i}: width mismatch");
-        assert_eq!(*h, height, "frame {i}: height mismatch");
+        assert_eq!(*w, width, "フレーム {i}: 幅が一致しない");
+        assert_eq!(*h, height, "フレーム {i}: 高さが一致しない");
         let psnr = psnr_y(&y, decoded_y, width, height);
         assert!(
             psnr >= min_psnr_db,
-            "frame {i}: PSNR {psnr:.1} dB < {min_psnr_db} dB"
+            "フレーム {i}: PSNR {psnr:.1} dB が {min_psnr_db} dB 未満"
         );
     }
 }
@@ -224,7 +234,7 @@ fn encode_with_svt_av1(
     frames: &[(Vec<u8>, Vec<u8>, Vec<u8>)],
 ) -> Vec<Vec<u8>> {
     let mut encoder =
-        shiguredo_svt_av1::Encoder::new(config).expect("failed to create svt-av1 encoder");
+        shiguredo_svt_av1::Encoder::new(config).expect("svt-av1 エンコーダーの生成に失敗");
     let options = shiguredo_svt_av1::EncodeOptions {
         force_keyframe: false,
     };
@@ -232,13 +242,13 @@ fn encode_with_svt_av1(
 
     for (y, u, v) in frames {
         let frame = shiguredo_svt_av1::FrameData::I420 { y, u, v };
-        encoder.encode(&frame, &options).expect("failed to encode");
+        encoder.encode(&frame, &options).expect("エンコードに失敗");
         while let Some(encoded) = encoder.next_frame() {
             packets.push(encoded.data().to_vec());
         }
     }
 
-    encoder.finish().expect("failed to finish");
+    encoder.finish().expect("finish に失敗");
     while let Some(encoded) = encoder.next_frame() {
         packets.push(encoded.data().to_vec());
     }
@@ -261,23 +271,23 @@ fn roundtrip_colorbar_svt_av1(
         .collect();
 
     let packets = encode_with_svt_av1(config, &input_frames);
-    assert!(!packets.is_empty(), "no encoded packets");
+    assert!(!packets.is_empty(), "エンコードされたパケットが空");
 
     let decoded_frames = decode_with_dav1d(&packets);
     assert_eq!(
         decoded_frames.len(),
         num_frames,
-        "decoded {} frames, expected {num_frames}",
+        "デコードされたフレーム数 {}, 期待値 {num_frames}",
         decoded_frames.len()
     );
 
     for (i, (decoded_y, w, h)) in decoded_frames.iter().enumerate() {
-        assert_eq!(*w, width, "frame {i}: width mismatch");
-        assert_eq!(*h, height, "frame {i}: height mismatch");
+        assert_eq!(*w, width, "フレーム {i}: 幅が一致しない");
+        assert_eq!(*h, height, "フレーム {i}: 高さが一致しない");
         let psnr = psnr_y(&y, decoded_y, width, height);
         assert!(
             psnr >= min_psnr_db,
-            "frame {i}: PSNR {psnr:.1} dB < {min_psnr_db} dB"
+            "フレーム {i}: PSNR {psnr:.1} dB が {min_psnr_db} dB 未満"
         );
     }
 }
@@ -305,20 +315,30 @@ fn test_roundtrip_aom_dummy_frames() {
         .collect();
 
     let packets = encode_with_aom(config, &input_frames);
-    assert!(!packets.is_empty(), "no encoded packets");
+    assert!(!packets.is_empty(), "エンコードされたパケットが空");
 
     let decoded_frames = decode_with_dav1d(&packets);
     assert_eq!(decoded_frames.len(), num_frames);
     for (i, (y, w, h)) in decoded_frames.iter().enumerate() {
-        assert_eq!(*w, width as usize, "frame {i}: width mismatch");
-        assert_eq!(*h, height as usize, "frame {i}: height mismatch");
-        assert!(!y.is_empty(), "frame {i}: empty Y plane");
+        assert_eq!(*w, width as usize, "フレーム {i}: 幅が一致しない");
+        assert_eq!(*h, height as usize, "フレーム {i}: 高さが一致しない");
+        assert!(!y.is_empty(), "フレーム {i}: Y プレーンが空");
     }
 }
 
 // ============================================================================
 // AOM エンコード → dav1d デコード: PSNR テスト
 // ============================================================================
+//
+// PSNR 閾値 (min_psnr_db = 50.0) の根拠:
+// 実測ベースライン (macOS):
+//   - aom Realtime CBR (320x240, 1000kbps): inf dB (MSE=0、完全再構成)
+//   - aom GoodQuality VBR (320x240, 1000kbps): inf dB
+//   - aom AllIntra Q (320x240, cq_level=30): 55.6 dB
+//   - svt-av1 VBR (320x240, 1Mbps): 70.6 dB
+//   - svt-av1 CRF (320x240, qp=35): 63.6 dB
+// プラットフォーム間の SIMD 実装差による丸め順の違いを考慮して、
+// ベースラインから 5 dB 以上の余裕を持つ 50.0 dB を閾値にしている。
 
 /// AOM Realtime CBR カラーバーの PSNR 検証
 #[test]
@@ -329,7 +349,7 @@ fn test_psnr_aom_realtime_cbr() {
     config.rc_target_bitrate = 1000;
     config.cpu_used = Some(8);
 
-    roundtrip_colorbar_aom(config, 30, 25.0);
+    roundtrip_colorbar_aom(config, 30, 50.0);
 }
 
 /// AOM GoodQuality VBR カラーバーの PSNR 検証
@@ -342,7 +362,7 @@ fn test_psnr_aom_good_quality_vbr() {
     config.cpu_used = Some(8);
     config.g_lag_in_frames = Some(0);
 
-    roundtrip_colorbar_aom(config, 10, 25.0);
+    roundtrip_colorbar_aom(config, 10, 50.0);
 }
 
 /// AOM AllIntra Q カラーバーの PSNR 検証
@@ -355,7 +375,7 @@ fn test_psnr_aom_all_intra_q() {
     config.cpu_used = Some(8);
     config.cq_level = Some(30);
 
-    roundtrip_colorbar_aom(config, 5, 25.0);
+    roundtrip_colorbar_aom(config, 5, 50.0);
 }
 
 // ============================================================================
@@ -390,14 +410,14 @@ fn test_roundtrip_svt_av1_dummy_frames() {
         .collect();
 
     let packets = encode_with_svt_av1(config, &input_frames);
-    assert!(!packets.is_empty(), "no encoded packets");
+    assert!(!packets.is_empty(), "エンコードされたパケットが空");
 
     let decoded_frames = decode_with_dav1d(&packets);
     assert_eq!(decoded_frames.len(), num_frames);
     for (i, (y, w, h)) in decoded_frames.iter().enumerate() {
-        assert_eq!(*w, width, "frame {i}: width mismatch");
-        assert_eq!(*h, height, "frame {i}: height mismatch");
-        assert!(!y.is_empty(), "frame {i}: empty Y plane");
+        assert_eq!(*w, width, "フレーム {i}: 幅が一致しない");
+        assert_eq!(*h, height, "フレーム {i}: 高さが一致しない");
+        assert!(!y.is_empty(), "フレーム {i}: Y プレーンが空");
     }
 }
 
@@ -411,7 +431,7 @@ fn test_psnr_svt_av1_vbr() {
     let mut config = svt_av1_encoder_config(320, 240);
     config.rate_control_mode = shiguredo_svt_av1::RcMode::Vbr;
 
-    roundtrip_colorbar_svt_av1(config, 5, 25.0);
+    roundtrip_colorbar_svt_av1(config, 5, 50.0);
 }
 
 /// SVT-AV1 CRF カラーバーの PSNR 検証
@@ -422,5 +442,79 @@ fn test_psnr_svt_av1_crf() {
     config.target_bit_rate = 0;
     config.qp = Some(35);
 
-    roundtrip_colorbar_svt_av1(config, 5, 25.0);
+    roundtrip_colorbar_svt_av1(config, 5, 50.0);
+}
+
+// ============================================================================
+// EAGAIN 経路のテスト
+// ============================================================================
+
+/// decode() が EAGAIN を返したときにデータが破棄されることと、
+/// フレームを取り出すと回復することを検証する
+///
+/// dav1d は前回送信したデータが入力バッファに残っている場合に EAGAIN を返す。
+/// 複数フレームを連結したバッファを 1 回で渡すと 1 フレーム分しか消費されず、
+/// 次の decode() が EAGAIN になる (n_threads=1 なら決定的)。
+/// EAGAIN で渡したデータは破棄されるため、フレームを取り出してから
+/// 同じデータを再度渡す必要がある
+#[test]
+fn test_decode_eagain_retry() {
+    let width: u32 = 320;
+    let height: u32 = 240;
+    let num_frames = 2;
+
+    let mut config =
+        shiguredo_aom::EncoderConfig::new(width, height, shiguredo_aom::ImageFormat::I420);
+    config.g_usage = shiguredo_aom::Usage::Realtime;
+    config.rc_end_usage = shiguredo_aom::RateControlMode::Cbr;
+    config.rc_target_bitrate = 1000;
+    config.cpu_used = Some(8);
+
+    let input_frames: Vec<(Vec<u8>, Vec<u8>, Vec<u8>)> = (0..num_frames)
+        .map(|i| generate_dummy_i420(width as usize, height as usize, i))
+        .collect();
+
+    // 2 フレームを連結して 1 バッファにする
+    let packets = encode_with_aom(config, &input_frames);
+    let mut combined = Vec::new();
+    for packet in &packets {
+        combined.extend_from_slice(packet);
+    }
+
+    let config = DecoderConfig::new();
+    let mut decoder = Decoder::new(config).expect("dav1d デコーダーの生成に失敗");
+
+    // 1 フレーム分しか消費されず、残りが内部バッファに残る
+    decoder.decode(&combined).expect("デコードに失敗");
+
+    // 内部バッファにデータが残っているため EAGAIN が返り、データは破棄される
+    let err = decoder.decode(&combined).expect_err("EAGAIN が返るべき");
+    assert!(err.is_eagain(), "EAGAIN であるべき");
+
+    // フレームを取り出すと内部バッファが空になり、再送できるようになる
+    let mut decoded = Vec::new();
+    while let Ok(Some(frame)) = decoder.next_frame() {
+        decoded.push((extract_y_plane(&frame), frame.width(), frame.height()));
+    }
+    decoder.finish().expect("finish に失敗");
+    while let Ok(Some(frame)) = decoder.next_frame() {
+        decoded.push((extract_y_plane(&frame), frame.width(), frame.height()));
+    }
+
+    assert_eq!(
+        decoded.len(),
+        num_frames,
+        "デコードされたフレーム数 {}, 期待値 {num_frames}",
+        decoded.len()
+    );
+    // 2 フレームの内容が異なること (重複出力のバグを検出する)
+    assert_ne!(
+        decoded[0].0, decoded[1].0,
+        "フレームが重複して出力されている"
+    );
+    for (y, w, h) in &decoded {
+        assert_eq!(*w, width as usize, "フレームの幅が一致しない");
+        assert_eq!(*h, height as usize, "フレームの高さが一致しない");
+        assert!(!y.is_empty(), "Y プレーンが空");
+    }
 }
