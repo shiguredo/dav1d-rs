@@ -11,21 +11,48 @@
 
 ## develop
 
+- [ADD] ubuntu-26.04 / ubuntu-26.04-arm の prebuilt バイナリをサポートする
+  - @voluntas
 - [UPDATE] dav1d を 1.5.3 から 1.5.4 に更新する
   - @voluntas
-- [ADD] ubuntu-26.04 / ubuntu-26.04-arm の prebuilt バイナリをサポートする
+- [FIX] `Decoder::get_decode_error_data_props()` で取得した `Dav1dDataProps` の参照を解放する
+  - dav1d の所有権契約に従い、`user_data` のリークを防ぐ
   - @voluntas
 
 ### misc
 
 - [ADD] GitHub Actions の CI に ubuntu-26.04 と ubuntu-26.04-arm を追加する
   - @voluntas
+- [ADD] PBT (proptest) と Fuzzing (cargo-fuzz) を導入する
+  - @voluntas
+- [ADD] CI に prebuilt ビルド経路の検証ジョブを追加する
+  - @voluntas
+- [ADD] リリース時のタグ・資産・シンボル検証を追加する
+  - @voluntas
+- [UPDATE] canary.py を正式リリース対応にする
+  - @voluntas
+- [FIX] DOCS_RS 向けダミーバインディングを修正する
+  - @voluntas
 
 ## 2026.1.0
 
 **リリース日**: 2026-03-31
 
-- [UPDATE] dav1d を 1.5.1 から 1.5.3 に更新する
+- [CHANGE] `DecodedFrame` のメタデータアクセサの戻り値を `Option` に変更する
+  - `frame_type()`, `temporal_id()`, `spatial_id()`, `show_frame()`,
+    `color_primaries()`, `transfer_characteristics()`, `matrix_coefficients()`,
+    `chroma_sample_position()`, `color_range()`, `profile()` が対象
+  - FFI 内部ポインタが null の場合に panic せず `None` を返すようにする
+  - @voluntas
+- [CHANGE] `SequenceHeader` の `hbd` フィールドを `bit_depth` に変更する
+  - dav1d 内部のインデックス値 (0, 1, 2) ではなく実際のビット深度 (8, 10, 12) を格納する
+  - @voluntas
+- [CHANGE] `Decoder::new()` を `Decoder::new(DecoderConfig)` に変更する
+  - `DecoderConfig` でスレッド数などのデコーダー設定を指定できるようにする
+  - @voluntas
+- [CHANGE] `DecodedFrame` の I420 固定の制約を除去する
+  - I400, I420, I422, I444 の全ピクセルレイアウトに対応する
+  - `u_plane()` / `v_plane()` は I400 の場合に空のスライスを返す
   - @voluntas
 - [ADD] `PixelLayout` enum を追加する (I400, I420, I422, I444)
   - @voluntas
@@ -113,21 +140,7 @@
   - @voluntas
 - [ADD] `Error::is_eagain()` で EAGAIN エラーの判定ができるようにする
   - @voluntas
-- [CHANGE] `DecodedFrame` のメタデータアクセサの戻り値を `Option` に変更する
-  - `frame_type()`, `temporal_id()`, `spatial_id()`, `show_frame()`,
-    `color_primaries()`, `transfer_characteristics()`, `matrix_coefficients()`,
-    `chroma_sample_position()`, `color_range()`, `profile()` が対象
-  - FFI 内部ポインタが null の場合に panic せず `None` を返すようにする
-  - @voluntas
-- [CHANGE] `SequenceHeader` の `hbd` フィールドを `bit_depth` に変更する
-  - dav1d 内部のインデックス値 (0, 1, 2) ではなく実際のビット深度 (8, 10, 12) を格納する
-  - @voluntas
-- [CHANGE] `Decoder::new()` を `Decoder::new(DecoderConfig)` に変更する
-  - `DecoderConfig` でスレッド数などのデコーダー設定を指定できるようにする
-  - @voluntas
-- [CHANGE] `DecodedFrame` の I420 固定の制約を除去する
-  - I400, I420, I422, I444 の全ピクセルレイアウトに対応する
-  - `u_plane()` / `v_plane()` は I400 の場合に空のスライスを返す
+- [UPDATE] dav1d を 1.5.1 から 1.5.3 に更新する
   - @voluntas
 - [FIX] プレーンアクセサで `from_raw_parts` 前に null ポインタチェックを追加する
   - UB を panic に落として安全性を確保する
