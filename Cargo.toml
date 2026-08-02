@@ -2,7 +2,7 @@
 name = "shiguredo_dav1d"
 version = "2026.2.0-canary.2"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.93"
 description = "Rust bindings for dav1d AV1 decoder"
 readme = "README.md"
 homepage = "https://github.com/shiguredo/dav1d-rs"
@@ -17,14 +17,23 @@ include = ["/LICENSE", "/README.md", "/build.rs", "/src/**/*"]
 url = "https://github.com/videolan/dav1d"
 version = "1.5.4"
 
+[workspace]
+members = [".", "pbt"]
+# fuzz は cargo-fuzz が個別に管理するためワークスペースから除外する
+exclude = ["fuzz"]
+
 [dependencies]
 
 [dev-dependencies]
+# PSNR テストで AV1 エンコードに使用する AOM バインディング
 shiguredo_aom = "2026.1"
+# PSNR テストで AV1 エンコードに使用する SVT-AV1 バインディング
 shiguredo_svt_av1 = "2026.1"
 
 [build-dependencies]
+# dav1d の C ヘッダーから Rust バインディングを生成する
 bindgen = "0.72"
+# Cargo.toml の [package.metadata.external-dependencies] を読み取る
 shiguredo_toml = "2026.2"
 
 [features]
