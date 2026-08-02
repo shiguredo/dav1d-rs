@@ -16,7 +16,10 @@
 - `build.rs` の `eprintln!("prebuilt ライブラリをダウンロード中: ...")` が日本語。AGENTS.md の「ログメッセージは全て英語にすること」に反する（同じ関数内の SHA256 検証メッセージは英語で不統一）
 - `Cargo.toml` の `rust-version = "1.88"` が、時雨堂 Rust 規約の MSRV 1.93 と不一致（意図的な緩和なら理由の明記が必要）
 - `CHANGES.md` の種別順が shiguredo-changelog 規約の「CHANGE → ADD → UPDATE → FIX」に反する（`## develop` は UPDATE → ADD、2026.1.0 セクションは UPDATE → ADD → CHANGE → FIX）
-- `src/sys.rs` の `#![allow(...)]` が、時雨堂 Rust 規約の「lint 警告の抑制は `#[allow]` ではなく `#[expect]` を使うこと」に反する（bindgen 生成コードを含むファイルのため、`#[expect]` が機能するか確認の上で対応）
+- ~~`src/sys.rs` の `#![allow(...)]` が、時雨堂 Rust 規約の「lint 警告の抑制は `#[allow]` ではなく `#[expect]` を使うこと」に反する~~ → **撤回（2026-08-02）**
+  - `sys.rs` は bindgen が生成する動的コードを include するためのモジュールであり、生成コードに lint を適用しない（aom-rs / svt-av1-rs と同じ構成）
+  - expect は「必ず違反が発生する」手書きコード向けの機能であり、生成コードはプラットフォームによって違反する lint が異なる（dav1d.h が errno.h を include するため、macOS と Linux で生成物が変わる）。実際に CI (ubuntu-24.04) で `expect(non_camel_case_types)` が unfulfilled になり失敗することを確認
+  - `#![allow(...)]` は `sys.rs` モジュール内に閉じており、手書きコード（`lib.rs` 等）には影響しない
 
 ## 設計方針
 
@@ -30,8 +33,8 @@
 
 ## 解決方法
 
-- `tests/test_psnr.rs` と `src/lib.rs` のテストメッセージを日本語に変更する
-- `build.rs` の日本語 eprintln を英語に変更する
-- `Cargo.toml` の `rust-version` を 1.93 に変更する（または意図的な緩和理由をコメントで明記する）
-- `CHANGES.md` の種別順を CHANGE → ADD → UPDATE → FIX に並べ替える（`## develop` と 2026.1.0 セクションの両方）
-- `src/sys.rs` の `#![allow]` を `#![expect]` に変更する（生成コードで期待通り動作することを確認する）
+- `tests/test_psnr.rs` と `src/lib.rs` のテストメッセージを日本語に変更する（対応済み）
+- `build.rs` の日本語 eprintln を英語に変更する（対応済み）
+- `Cargo.toml` の `rust-version` を 1.93 に変更する（対応済み）
+- `CHANGES.md` の種別順を CHANGE → ADD → UPDATE → FIX に並べ替える（対応済み）
+- `src/sys.rs` の `#![allow]` は生成コード用の lint 抑止であり、expect 化しない（撤回。aom-rs / svt-av1-rs と同じ構成を維持する）

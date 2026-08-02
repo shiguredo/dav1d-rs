@@ -27,9 +27,6 @@ fn main() {
     // DOCS_RS の有無で生成物 (ダミー or 実バインディング) が切り替わるため、
     // 環境変数の変更で必ず build.rs を再実行する
     println!("cargo::rerun-if-env-changed=DOCS_RS");
-    // DOCS_RS ビルドで有効になるダミーバインディング用 cfg を宣言する
-    // (DOCS_RS の有無に関係なく check-cfg を設定する必要がある)
-    println!("cargo::rustc-check-cfg=cfg(docs_rs_dummy)");
 
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("infallible"));
@@ -51,9 +48,6 @@ fn main() {
     .expect("failed to write metadata file");
 
     if env::var("DOCS_RS").is_ok() {
-        // DOCS_RS ビルドではダミーバインディングを使用する。
-        // sys.rs の lint 抑止をダミー用に切り替えるための cfg を設定する
-        println!("cargo::rustc-cfg=docs_rs_dummy");
         // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップして、
         // 代わりに、ドキュメント生成時に必要なシンボルをダミーで出力している。
         //
