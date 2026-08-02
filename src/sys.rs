@@ -1,13 +1,13 @@
-// bindgen が生成するバインディングはこれらの lint に必ず違反するため、
-// 期待通りに発生する警告として expect で抑止する。
+// bindgen が生成するバインディングはプラットフォームによって違反する lint が
+// 異なる (macOS と Linux で生成される型名・定数名が違う) ため、
+// expect ではなく allow で抑止する。
+// expect は「必ず満たされる」場合のみ使えるが、生成物では保証できない。
 // DOCS_RS 向けダミーバインディングは命名規約に従った定義であり
-// lint が発生しないため、そのビルドでは allow に切り替える
-#![expect(non_upper_case_globals)]
-#![cfg_attr(docs_rs_dummy, allow(non_camel_case_types, non_snake_case, dead_code))]
-#![cfg_attr(
-    not(docs_rs_dummy),
-    expect(non_camel_case_types, non_snake_case, dead_code)
-)]
+// lint が発生しないため、そのビルドでは improper_ctypes のみ追加で抑止する
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+#![allow(dead_code)]
 // clippy::all は生成コードで必ず違反するとは限らないため expect は使えない
 #![allow(clippy::all)]
 // DOCS_RS 向けダミーバインディングの Dav1dContext / Dav1dData は
