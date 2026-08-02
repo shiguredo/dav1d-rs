@@ -22,6 +22,17 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
 
+      # 誤ったタグ (v プレフィックス付き等) で Release が作成されるのを防ぐ
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          CARGO_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/^version = "\(.*\)"/\1/')
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::tag ($VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+          echo "Tag matches Cargo.toml version: $VERSION"
+
       - name: Create Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,6 +106,46 @@ jobs:
           OUT_DIR=$(find target/release/build/shiguredo_dav1d-*/out -maxdepth 0 -type d 2>/dev/null | head -1)
           echo "OUT_DIR=${OUT_DIR}" >> $GITHUB_OUTPUT
 
+      - name: Verify symbol rewriting
+        shell: bash
+        run: |
+          OUT_DIR="${{ steps.find_out_dir.outputs.OUT_DIR }}"
+          # meson はビルド中間ディレクトリにも libdav1d.a を残すため、
+          # シンボル書き換え済みのインストール先 (out/build/dav1d/build/src/) のみを検索する
+          LIB_PATH="$OUT_DIR/build/dav1d/build/src/libdav1d.a"
+          if [ ! -f "$LIB_PATH" ]; then
+            LIB_PATH="$OUT_DIR/build/dav1d/build/src/dav1d.lib"
+          fi
+          if [ ! -f "$LIB_PATH" ]; then
+            echo "::error::static library not found"
+            exit 1
+          fi
+
+          SYSROOT=$(rustc --print sysroot)
+          TARGET=$(rustc -vV | sed -n 's/^host: //p')
+          LLVM_NM="$SYSROOT/lib/rustlib/$TARGET/bin/llvm-nm"
+          if [ ! -f "$LLVM_NM" ]; then
+            LLVM_NM="$SYSROOT/lib/rustlib/$TARGET/bin/llvm-nm.exe"
+          fi
+
+          # 定義済み外部シンボルのうち shiguredo_dav1d_ プレフィックスが付いていないものを検出する
+          # macOS では先頭 _ を除去して判定する
+          # --format=just-symbols はオブジェクトファイル名も出力するため、
+          # シンボル名のみをフィルタリングする（.c.o: などは末尾に : が付くため除外される）
+          # NASM 生成シンボルは . を含む場合がある (例: dav1d_cdef_dir_8bpc_avx2.main)
+          VIOLATIONS=$("$LLVM_NM" --defined-only --extern-only --format=just-symbols "$LIB_PATH" \
+            | sed 's/^_//' \
+            | grep -E '^[a-zA-Z_][a-zA-Z0-9_.]*$' \
+            | grep -v '^shiguredo_dav1d_' \
+            || true)
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::symbols without shiguredo_dav1d_ prefix found:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "All symbols correctly prefixed with shiguredo_dav1d_"
+
       - name: Create prebuilt archive
         shell: bash
         run: |
@@ -106,6 +157,9 @@ jobs:
             cp "$SRC_DIR/libdav1d.a" staging/lib/
           elif [ -f "$SRC_DIR/dav1d.lib" ]; then
             cp "$SRC_DIR/dav1d.lib" staging/lib/libdav1d.a
+          else
+            echo "::error::static library not found in $SRC_DIR"
+            exit 1
           fi
           cp "$OUT_DIR/bindings.rs" staging/
           tar czf dav1d-${{ matrix.target }}.tar.gz -C staging .
@@ -137,6 +191,27 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # 配布する全 8 資産のダウンロードと SHA256 照合を行い、
+      # アップロード後の破損・欠落を検出する
+      - name: Verify all prebuilt assets
+        shell: bash
+        run: |
+          VERSION="${{ needs.github-release.outputs.version }}"
+          TARGETS="ubuntu-26.04_x86_64 ubuntu-26.04_arm64 ubuntu-24.04_x86_64 ubuntu-24.04_arm64 ubuntu-22.04_x86_64 ubuntu-22.04_arm64 macos_arm64 windows_x86_64"
+          BASE_URL="https://github.com/shiguredo/dav1d-rs/releases/download/${VERSION}"
+          for target in $TARGETS; do
+            curl -fsSL -o "dav1d-${target}.tar.gz" "${BASE_URL}/dav1d-${target}.tar.gz"
+            curl -fsSL -o "dav1d-${target}.tar.gz.sha256" "${BASE_URL}/dav1d-${target}.tar.gz.sha256"
+            EXPECTED=$(awk '{print $1}' "dav1d-${target}.tar.gz.sha256")
+            ACTUAL=$(sha256sum "dav1d-${target}.tar.gz" | awk '{print $1}')
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "::error::SHA256 mismatch for ${target}: expected ${EXPECTED}, actual ${ACTUAL}"
+              exit 1
+            fi
+            echo "Verified: ${target}"
+          done
+
       - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
         id: auth
       - run: cargo publish
