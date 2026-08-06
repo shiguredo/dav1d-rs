@@ -6,6 +6,10 @@
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
 
+## reopened にした理由
+
+- 起票時に誤って `issues/pending/` 直下に作成されていたため、`issues/` 直下の open 状態に戻す
+- 仕様的に対応が難しい、設計判断が必要などの pending にする理由がない
 ## 目的
 
 デフォルトのビルド経路（GitHub Releases からの prebuilt ダウンロード）を CI で検証し、配布資産の破損や不足をリリース前に検出できるようにする。
