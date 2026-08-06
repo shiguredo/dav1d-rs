@@ -1,7 +1,7 @@
 # README にリリース手順を記載する
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/add-release-procedure
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
