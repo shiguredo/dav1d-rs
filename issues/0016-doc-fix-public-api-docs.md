@@ -1,7 +1,7 @@
 # 公開 API のドキュメントを実装と dav1d 仕様に一致させる
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/fix-public-api-docs
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
