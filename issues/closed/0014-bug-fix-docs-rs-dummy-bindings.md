@@ -32,6 +32,7 @@
 
 ## 解決方法
 
-- `build.rs` の rerun-if-env-changed に `DOCS_RS` を追加する
-- DOCS_RS 分岐のダミー定義を `src/lib.rs` / `src/codec_info.rs` が参照する全シンボルに拡張する（`build.rs` の DOCS_RS 分岐）
-- または、ダミー定義を廃止して DOCS_RS 時にも bindgen で本物のバインディングを生成する方式を検討する（ネットワーク不要のため、prebuilt ダウンロードをスキップするだけでよい）
+- `build.rs` の rerun-if-env-changed に `DOCS_RS` を追加し、DOCS_RS の有無で build.rs が必ず再実行されるようにした
+- DOCS_RS 分岐のダミー定義を `src/lib.rs` が参照する全シンボルに拡張した（関数は extern ブロックのスタブ、構造体はフィールド付き定義、定数は dav1d.h の値）
+- ダミー定義を廃止して bindgen で本物のバインディングを生成する方式は、採用しなかった
+- `DOCS_RS=1 cargo check` と、DOCS_RS を外した通常ビルドの両方でビルドが通ることを確認した
