@@ -1,7 +1,7 @@
 # CI で prebuilt（デフォルト）ビルド経路を検証する
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/add-prebuilt-ci-tests
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
