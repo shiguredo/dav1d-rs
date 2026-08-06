@@ -1,7 +1,7 @@
 # canary.py を正式リリースフローに対応させ、誤リリースを防ぐ
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/fix-canary-release-flow
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
