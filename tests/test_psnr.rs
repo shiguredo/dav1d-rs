@@ -332,7 +332,8 @@ fn encode_with_svt_av1_16bit(
 
 /// dav1d でデコードして (Y プレーン u16, 幅, 高さ) の一覧を返す (10-bit 用)
 ///
-/// 各フレームが 10-bit (ハイビット深度) でデコードされていることを検証する。
+/// 各フレームが 10-bit (ハイビット深度) でデコードされ、Y/U/V すべての
+/// u16 プレーンアクセサが有効であることを検証する。
 fn decode_with_dav1d_16bit(packets: &[Vec<u8>]) -> Vec<(Vec<u16>, usize, usize)> {
     let config = DecoderConfig::new();
     let mut decoder = Decoder::new(config).expect("dav1d デコーダーの生成に失敗");
@@ -343,6 +344,14 @@ fn decode_with_dav1d_16bit(packets: &[Vec<u8>]) -> Vec<(Vec<u16>, usize, usize)>
         while let Ok(Some(frame)) = decoder.next_frame() {
             assert_eq!(frame.bit_depth(), 10, "10-bit でデコードされるべき");
             assert!(frame.is_high_depth(), "ハイビット深度であるべき");
+            assert!(
+                frame.u_plane_u16().is_some(),
+                "u16 の U プレーンにアクセスできるべき"
+            );
+            assert!(
+                frame.v_plane_u16().is_some(),
+                "u16 の V プレーンにアクセスできるべき"
+            );
             decoded.push((extract_y_plane_u16(&frame), frame.width(), frame.height()));
         }
     }
@@ -351,6 +360,14 @@ fn decode_with_dav1d_16bit(packets: &[Vec<u8>]) -> Vec<(Vec<u16>, usize, usize)>
     while let Ok(Some(frame)) = decoder.next_frame() {
         assert_eq!(frame.bit_depth(), 10, "10-bit でデコードされるべき");
         assert!(frame.is_high_depth(), "ハイビット深度であるべき");
+        assert!(
+            frame.u_plane_u16().is_some(),
+            "u16 の U プレーンにアクセスできるべき"
+        );
+        assert!(
+            frame.v_plane_u16().is_some(),
+            "u16 の V プレーンにアクセスできるべき"
+        );
         decoded.push((extract_y_plane_u16(&frame), frame.width(), frame.height()));
     }
 
