@@ -1,7 +1,7 @@
 # AGENTS.md / 時雨堂 Rust 規約違反を修正する
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/fix-convention-violations
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
