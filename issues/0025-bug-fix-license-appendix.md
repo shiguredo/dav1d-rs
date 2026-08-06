@@ -1,7 +1,7 @@
 # LICENSE ファイルを正規の Apache-2.0 全文に修正する
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/fix-license-appendix
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
