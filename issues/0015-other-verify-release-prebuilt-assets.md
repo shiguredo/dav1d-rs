@@ -1,7 +1,7 @@
 # リリース時の prebuilt 資産検証とタグ整合検証を強化する
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/fix-verify-release-prebuilt-assets
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
