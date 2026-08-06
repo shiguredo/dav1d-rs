@@ -1,7 +1,7 @@
 # get_decode_error_data_props() で Dav1dDataProps の参照を解放する
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/fix-data-props-unref
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
