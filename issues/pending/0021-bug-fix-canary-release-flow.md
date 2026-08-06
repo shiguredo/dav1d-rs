@@ -6,6 +6,10 @@
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
 
+## reopened にした理由
+
+- 起票時に誤って `issues/pending/` 直下に作成されていたため、`issues/` 直下の open 状態に戻す
+- 仕様的に対応が難しい、設計判断が必要などの pending にする理由がない
 ## 目的
 
 canary.py で正式リリース（例: 2026.2.0-canary.2 → 2026.2.0）を作成できるようにし、タグ push 前のブランチ・作業ツリー検証で誤リリースを防ぐ。
