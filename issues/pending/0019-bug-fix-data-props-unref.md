@@ -6,6 +6,10 @@
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
 
+## reopened にした理由
+
+- 起票時に誤って `issues/pending/` 直下に作成されていたため、`issues/` 直下の open 状態に戻す
+- 仕様的に対応が難しい、設計判断が必要などの pending にする理由がない
 ## 目的
 
 dav1d の所有権契約（呼び出し側が参照の所有権を引き継ぐ）に従い、`Dav1dDataProps` の `user_data_ref` のリーク経路を断つ。
