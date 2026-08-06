@@ -1,0 +1,13 @@
+[package]
+name = "shiguredo_dav1d_pbt"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# PBT の対象となる公開 API を提供する
+shiguredo_dav1d = { path = ".." }
+
+[dev-dependencies]
+# PBT (Property-Based Testing) のフレームワーク
+proptest = "1.6"

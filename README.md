@@ -31,6 +31,8 @@ Please read <https://github.com/shiguredo/oss> before use.
 
 ## 動作要件
 
+- Ubuntu 26.04 x86_64
+- Ubuntu 26.04 arm64
 - Ubuntu 24.04 x86_64
 - Ubuntu 24.04 arm64
 - Ubuntu 22.04 x86_64
@@ -39,6 +41,9 @@ Please read <https://github.com/shiguredo/oss> before use.
 - macOS 15 arm64
 - Windows 11 x86_64
 - Windows Server 2025 x86_64
+
+macOS 26 と macOS 15 は同一の prebuilt バイナリ (`macos_arm64`) を共用し、
+Windows 11 と Windows Server 2025 も同一の prebuilt バイナリ (`windows_x86_64`) を共用する。
 
 ### ソースビルド時の追加要件
 
@@ -96,7 +101,19 @@ let config = DecoderConfig::new();
 let mut decoder = Decoder::new(config)?;
 
 // 圧縮データをデコード
-decoder.decode(&compressed_data)?;
+// EAGAIN が返された場合は渡したデータが破棄されるため、
+// フレームを取り出してから同じデータを再度渡す
+loop {
+    if let Err(e) = decoder.decode(&compressed_data) {
+        if !e.is_eagain() {
+            return Err(e);
+        }
+        // 内部バッファを空にしてから同じデータを再送する
+        while let Ok(Some(_)) = decoder.next_frame() {}
+        continue;
+    }
+    break;
+}
 
 // デコード済みフレームを取得
 while let Ok(Some(frame)) = decoder.next_frame() {
@@ -124,16 +141,22 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `n_threads` | `usize` | 1 | デコードに使用するスレッド数 |
-| `max_frame_delay` | `usize` | 0 | 最大フレーム遅延 (0 で自動決定) |
+| `n_threads` | `usize` | 1 | デコードに使用するスレッド数 (0 で論理コア数による自動決定) |
+| `max_frame_delay` | `usize` | 0 | 最大フレーム遅延 (0 で `ceil(sqrt(n_threads))`、1 で低遅延デコード) |
 | `apply_grain` | `bool` | true | フィルムグレインを適用するか |
 | `operating_point` | `usize` | 0 | スケーラブル AV1 のオペレーティングポイント (0-31) |
 | `all_layers` | `bool` | true | 全空間レイヤーを出力するか |
 | `frame_size_limit` | `Option<u32>` | None | 最大フレームサイズ制限 (None で無制限) |
-| `strict_std_compliance` | `bool` | false | 規格違反時にデコードを中断するか |
-| `output_invisible_frames` | `bool` | false | 非表示フレームも出力するか |
+| `strict_std_compliance` | `bool` | false | ビットストリームのデコードに影響しない規格違反 (不整合・無効なメタデータ等) のときにデコードを中断するか |
+| `output_invisible_frames` | `bool` | false | 非表示フレームも符号化順で出力するか (show-existing-frame により同じフレームが 2 回出力されうる) |
 | `inloop_filters` | `InloopFilterType` | ALL | 有効にするインループフィルター |
 | `decode_frame_type` | `DecodeFrameType` | All | デコードするフレーム種別 |
+
+### 未対応の dav1d 機能
+
+- カスタムピクセルアロケータ (`Dav1dSettings.allocator`)
+- ログコールバック (`Dav1dSettings.logger`)
+- ゼロコピー入力 (`dav1d_data_wrap` / `dav1d_data_wrap_user_data`)
 
 ### `PixelLayout`
 
@@ -175,16 +198,16 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 | `y_stride()` | `usize` | Y 成分のストライド (バイト単位) |
 | `u_stride()` | `usize` | U 成分のストライド (バイト単位) |
 | `v_stride()` | `usize` | V 成分のストライド (バイト単位) |
-| `frame_type()` | `FrameType` | フレーム種別 |
-| `temporal_id()` | `u8` | SVC 用テンポラル ID |
-| `spatial_id()` | `u8` | SVC 用スパーシャル ID |
-| `show_frame()` | `bool` | 表示フレームかどうか |
-| `color_primaries()` | `ColorPrimaries` | 色域 |
-| `transfer_characteristics()` | `TransferCharacteristics` | 伝達特性 |
-| `matrix_coefficients()` | `MatrixCoefficients` | 行列係数 |
-| `chroma_sample_position()` | `ChromaSamplePosition` | クロマサンプル位置 |
-| `color_range()` | `ColorRange` | 色域レンジ |
-| `profile()` | `u8` | AV1 プロファイル (0, 1, 2) |
+| `frame_type()` | `Option<FrameType>` | フレーム種別 (メタデータがない場合は `None`) |
+| `temporal_id()` | `Option<u8>` | SVC 用テンポラル ID (メタデータがない場合は `None`) |
+| `spatial_id()` | `Option<u8>` | SVC 用スパーシャル ID (メタデータがない場合は `None`) |
+| `show_frame()` | `Option<bool>` | 表示フレームかどうか (メタデータがない場合は `None`) |
+| `color_primaries()` | `Option<ColorPrimaries>` | 色域 (メタデータがない場合は `None`) |
+| `transfer_characteristics()` | `Option<TransferCharacteristics>` | 伝達特性 (メタデータがない場合は `None`) |
+| `matrix_coefficients()` | `Option<MatrixCoefficients>` | 行列係数 (メタデータがない場合は `None`) |
+| `chroma_sample_position()` | `Option<ChromaSamplePosition>` | クロマサンプル位置 (メタデータがない場合は `None`) |
+| `color_range()` | `Option<ColorRange>` | 色域レンジ (メタデータがない場合は `None`) |
+| `profile()` | `Option<u8>` | AV1 プロファイル (0, 1, 2) (メタデータがない場合は `None`) |
 | `content_light_level()` | `Option<ContentLightLevel>` | HDR コンテンツライトレベル |
 | `mastering_display()` | `Option<MasteringDisplay>` | HDR マスタリングディスプレイ情報 |
 
@@ -223,6 +246,46 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 |---|---|
 | `DAV1D_TARGET` | prebuilt バイナリのプラットフォーム名を明示的に指定する |
 
+## リリース手順
+
+### canary リリース
+
+1. `canary.py` でバージョンをインクリメントし、コミット・タグ・プッシュを実行する
+
+```bash
+python3 canary.py
+```
+
+- バージョンは `2026.2.0-canary.2` → `2026.2.0-canary.3` のように更新される
+- タグのプッシュにより、GitHub Actions の `release.yml` が GitHub Release の作成、全プラットフォームの prebuilt ビルド、crates.io への公開まで自動実行する
+- タグのプッシュは `develop` または `release/` ブランチからのみ実行できる
+
+### 正式リリース
+
+1. `release/YYYY.M.P` ブランチを `develop` から作成する
+
+```bash
+git checkout -b release/2026.2.0 develop
+```
+
+2. `canary.py --release` で canary バージョンを正式リリース版に変換する
+
+```bash
+python3 canary.py --release
+```
+
+- バージョンは `2026.2.0-canary.2` → `2026.2.0` のように変換される
+- `CHANGES.md` の `## develop` セクションが `## 2026.2.0` とリリース日に更新される
+- コミット・タグ・プッシュまで自動で実行される
+
+3. プッシュ後、GitHub Actions の `release.yml` が以下を自動実行する
+
+- GitHub Release の作成
+- 全 8 プラットフォームの prebuilt バイナリのビルドとアップロード
+- crates.io への公開
+
+4. リリース後、`release/` ブランチを `develop` にマージする
+
 ## dav1d ライセンス
 
 <https://code.videolan.org/videolan/dav1d/-/blob/master/COPYING>
@@ -258,7 +321,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Apache License 2.0
 
 ```text
-Copyright 2026-2026, Shiguredo Inc.
+Copyright 2026, Shiguredo Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

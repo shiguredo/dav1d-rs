@@ -1,0 +1,31 @@
+[package]
+name = "shiguredo_dav1d-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# fuzz は cargo-fuzz が個別に管理する独立したワークスペースとして扱う
+[workspace]
+
+[[bin]]
+bench = false
+doc = false
+name = "fuzz_parse_sequence_header"
+path = "fuzz_targets/fuzz_parse_sequence_header.rs"
+test = false
+
+[[bin]]
+bench = false
+doc = false
+name = "fuzz_decode"
+path = "fuzz_targets/fuzz_decode.rs"
+test = false
+
+[dependencies]
+# Fuzzing のランタイム (cargo-fuzz が提供する libFuzzer)
+libfuzzer-sys = "0.4"
+# 公開 API の任意バイト列に対する panic 耐性を検証する対象
+shiguredo_dav1d = { path = ".." }

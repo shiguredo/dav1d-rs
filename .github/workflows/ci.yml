@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - run: rustup update stable
       - run: sudo apt-get update && sudo apt-get install -y build-essential meson ninja-build nasm
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
@@ -32,7 +32,7 @@ jobs:
           os: ubuntu-24.04
           toolchain: stable
       - run: cargo fmt --all --check
-      - run: cargo clippy --features source-build -- -D warnings
+      - run: cargo clippy --workspace --all-targets --features source-build -- -D warnings
 
   test:
     name: ${{ matrix.os }}
@@ -41,6 +41,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: ubuntu-26.04
+          - os: ubuntu-26.04-arm
           - os: ubuntu-24.04
           - os: ubuntu-24.04-arm
           - os: ubuntu-22.04
@@ -51,7 +53,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - run: rustup update stable
       - name: Install build dependencies (Ubuntu)
         if: startsWith(matrix.os, 'ubuntu')
@@ -69,7 +71,9 @@ jobs:
         with:
           os: ${{ matrix.os }}
           toolchain: stable
-      - run: cargo test --features source-build
+      # shiguredo_aom / shiguredo_svt_av1 は ubuntu-26.04 用の安定版 prebuilt が
+      # 揃っていないため、CI では常に source-build でビルドする
+      - run: cargo test --features source-build -F shiguredo_aom/source-build -F shiguredo_svt_av1/source-build
 
       # シンボル書き換え確認: 全定義済みシンボルが shiguredo_dav1d_ プレフィックス付きであること
       - name: Verify symbol rewriting
@@ -108,6 +112,29 @@ jobs:
           fi
           echo "All symbols correctly prefixed with shiguredo_dav1d_"
 
+  # デフォルトの prebuilt ダウンロード経路でビルドできることを検証する
+  # source-build とは異なり、リリース資産 (curl ダウンロード・SHA256 検証・リンク) の
+  # 完全性も同時に検証される
+  prebuilt:
+    name: prebuilt-${{ matrix.os }}
+    needs: fmt-clippy
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+          - os: windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: rustup update stable
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.os }}
+          toolchain: stable
+      - run: cargo check
+
   # docs.rs 向けビルド確認
   docs-rs:
     name: docs.rs
@@ -116,13 +143,14 @@ jobs:
     env:
       DOCS_RS: 1
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - run: rustup update stable
       - run: cargo doc --no-deps
 
   slack_notify:
     needs:
       - fmt-clippy
+      - prebuilt
       - test
       - docs-rs
     runs-on: ubuntu-slim

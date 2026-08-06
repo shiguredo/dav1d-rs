@@ -24,6 +24,9 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-env-changed=CARGO_FEATURE_SOURCE_BUILD");
     println!("cargo::rerun-if-env-changed=DAV1D_TARGET");
+    // DOCS_RS の有無で生成物 (ダミー or 実バインディング) が切り替わるため、
+    // 環境変数の変更で必ず build.rs を再実行する
+    println!("cargo::rerun-if-env-changed=DOCS_RS");
 
     // 各種変数やビルドディレクトリのセットアップ
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("infallible"));
@@ -46,21 +49,26 @@ fn main() {
 
     if env::var("DOCS_RS").is_ok() {
         // Docs.rs 向けのビルドでは git clone ができないので build.rs の処理はスキップして、
-        // 代わりに、ドキュメント生成時に最低限必要な構造体だけをダミーで出力している。
+        // 代わりに、ドキュメント生成時に必要なシンボルをダミーで出力している。
         //
         // シンボル書き換えもスキップされる（ビルド自体が行われないため）。
+        //
+        // src/lib.rs が参照する全シンボル (関数・構造体フィールド・定数) を網羅すること。
+        // lib.rs に公開 API を追加した場合は、このダミーにも追従すること。
         //
         // See also: https://docs.rs/about/builds
         fs::write(
             output_bindings_path,
             r#"
 // docs.rs 向けダミー定義
-pub struct Dav1dContext;
-pub struct Dav1dPicture;
-pub struct Dav1dSettings;
-pub struct Dav1dData;
-pub struct Dav1dSequenceHeader;
-pub struct Dav1dDataProps;
+//
+// ドキュメント生成時はリンクも実行されないため、関数は extern ブロックの
+// スタブとして定義する。EAGAIN 等の errno 値はプラットフォーム依存だが、
+// ダミーはドキュメント生成専用のため macOS の値 (35, 12) を使用する。
+use std::ffi::{c_char, c_int};
+
+pub const EAGAIN: u32 = 35;
+pub const ENOMEM: u32 = 12;
 
 pub type Dav1dPixelLayout = u32;
 pub const Dav1dPixelLayout_DAV1D_PIXEL_LAYOUT_I400: u32 = 0;
@@ -145,8 +153,129 @@ pub type Dav1dEventFlags = u32;
 pub const Dav1dEventFlags_DAV1D_EVENT_FLAG_NEW_SEQUENCE: u32 = 1;
 pub const Dav1dEventFlags_DAV1D_EVENT_FLAG_NEW_OP_PARAMS_INFO: u32 = 2;
 
-pub const EAGAIN: u32 = 35;
-pub const ENOMEM: u32 = 12;
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dContext;
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dPictureHeader {
+    pub w: c_int,
+    pub h: c_int,
+    pub layout: Dav1dPixelLayout,
+    pub bpc: u8,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dFrameHeader {
+    pub frame_type: Dav1dFrameType,
+    pub temporal_id: u8,
+    pub spatial_id: u8,
+    pub show_frame: c_int,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dSequenceHeader {
+    pub profile: u8,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub layout: Dav1dPixelLayout,
+    pub pri: Dav1dColorPrimaries,
+    pub trc: Dav1dTransferCharacteristics,
+    pub mtrx: Dav1dMatrixCoefficients,
+    pub chr: Dav1dChromaSamplePosition,
+    pub color_range: u8,
+    pub hbd: u8,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dContentLightLevel {
+    pub max_content_light_level: u16,
+    pub max_frame_average_light_level: u16,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dMasteringDisplay {
+    pub primaries: [[u16; 2]; 3],
+    pub white_point: [u16; 2],
+    pub max_luminance: u32,
+    pub min_luminance: u32,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dPicture {
+    pub p: Dav1dPictureHeader,
+    pub data: [*mut u8; 4],
+    pub stride: [isize; 4],
+    pub frame_hdr: *mut Dav1dFrameHeader,
+    pub seq_hdr: *const Dav1dSequenceHeader,
+    pub content_light: *const Dav1dContentLightLevel,
+    pub mastering_display: *const Dav1dMasteringDisplay,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dSettings {
+    pub n_threads: c_int,
+    pub max_frame_delay: c_int,
+    pub apply_grain: c_int,
+    pub operating_point: c_int,
+    pub all_layers: c_int,
+    pub frame_size_limit: usize,
+    pub strict_std_compliance: c_int,
+    pub output_invisible_frames: c_int,
+    pub inloop_filters: Dav1dInloopFilterType,
+    pub decode_frame_type: Dav1dDecodeFrameType,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dData;
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dDataProps {
+    pub timestamp: i64,
+    pub duration: i64,
+    pub offset: i64,
+    pub size: usize,
+}
+
+unsafe extern "C" {
+    pub fn dav1d_version() -> *const c_char;
+    pub fn dav1d_version_api() -> u32;
+    pub fn dav1d_parse_sequence_header(
+        out: *mut Dav1dSequenceHeader,
+        buf: *const u8,
+        sz: usize,
+    ) -> c_int;
+    pub fn dav1d_default_settings(s: *mut Dav1dSettings);
+    pub fn dav1d_get_frame_delay(s: *const Dav1dSettings) -> c_int;
+    pub fn dav1d_open(c_out: *mut *mut Dav1dContext, s: *const Dav1dSettings) -> c_int;
+    pub fn dav1d_data_create(data: *mut Dav1dData, sz: usize) -> *mut u8;
+    pub fn dav1d_send_data(c: *mut Dav1dContext, in_data: *mut Dav1dData) -> c_int;
+    pub fn dav1d_data_unref(data: *mut Dav1dData);
+    pub fn dav1d_get_event_flags(c: *mut Dav1dContext, flags: *mut Dav1dEventFlags) -> c_int;
+    pub fn dav1d_get_decode_error_data_props(
+        c: *mut Dav1dContext,
+        out: *mut Dav1dDataProps,
+    ) -> c_int;
+    pub fn dav1d_data_props_unref(props: *mut Dav1dDataProps);
+    pub fn dav1d_apply_grain(
+        c: *mut Dav1dContext,
+        out: *mut Dav1dPicture,
+        in_pic: *const Dav1dPicture,
+    ) -> c_int;
+    pub fn dav1d_flush(c: *mut Dav1dContext);
+    pub fn dav1d_get_picture(c: *mut Dav1dContext, out: *mut Dav1dPicture) -> c_int;
+    pub fn dav1d_close(c_out: *mut *mut Dav1dContext);
+    pub fn dav1d_picture_unref(pic: *mut Dav1dPicture);
+}
 "#,
         )
         .expect("write file error");
@@ -186,7 +315,7 @@ fn download_prebuilt(out_dir: &Path) -> PathBuf {
     fs::create_dir_all(&prebuilt_dir).expect("failed to create prebuilt directory");
 
     // curl でアーカイブをダウンロード
-    eprintln!("prebuilt ライブラリをダウンロード中: {}", archive_url);
+    eprintln!("Downloading prebuilt library: {}", archive_url);
     let status = Command::new("curl")
         .args(["-fsSL", "-o"])
         .arg(&archive_path)
@@ -322,7 +451,10 @@ fn build_from_source(out_dir: &Path, output_bindings_path: &Path) -> PathBuf {
     let src_build_dir = src_dir.join("build/");
     let input_header_path = src_dir.join("include/dav1d/dav1d.h");
     let output_lib_dir = src_build_dir.join("src/");
-    let _ = fs::remove_dir_all(&out_build_dir);
+    // 前回のビルド成果物を削除する (削除に失敗したら壊れた状態でビルドが進むため失敗させる)
+    if out_build_dir.exists() {
+        fs::remove_dir_all(&out_build_dir).expect("failed to remove build directory");
+    }
     fs::create_dir(&out_build_dir).expect("failed to create build directory");
 
     // 依存ライブラリのリポジトリを取得する
@@ -483,11 +615,11 @@ fn rewrite_symbols(lib_dir: &Path, out_dir: &Path) -> SymbolLinkNameCallbacks {
     //
     // それ以外のシンボル (bitfn_*, msac_* 等の内部シンボル) は先頭に SYMBOL_PREFIX_ を付与する。
     //   例: bitfn_clz → shiguredo_dav1d_bitfn_clz
-    let rename_symbol = |name: &str| -> Option<String> {
+    let rename_symbol = |name: &str| -> String {
         if let Some(rest) = name.strip_prefix("dav1d_") {
-            Some(format!("{SYMBOL_PREFIX}_{rest}"))
+            format!("{SYMBOL_PREFIX}_{rest}")
         } else {
-            Some(format!("{SYMBOL_PREFIX}_{name}"))
+            format!("{SYMBOL_PREFIX}_{name}")
         }
     };
 
@@ -530,7 +662,10 @@ fn find_static_library(lib_dir: &Path) -> PathBuf {
 /// llvm-tools は rustup が管理する sysroot 配下にインストールされるため、
 /// sysroot のパスを取得して llvm-nm / llvm-objcopy の探索に使用する。
 fn get_rustc_sysroot() -> PathBuf {
-    let output = Command::new("rustc")
+    // Cargo は build script に使用中の rustc のパスを RUSTC 環境変数で渡す。
+    // PATH 探索だと実際にビルドで使われた rustc と食い違う可能性がある
+    let rustc = env::var("RUSTC").expect("RUSTC environment variable not set");
+    let output = Command::new(rustc)
         .arg("--print")
         .arg("sysroot")
         .output()
@@ -662,7 +797,7 @@ fn is_symbol_name(s: &str) -> bool {
 fn build_symbol_rename_maps(
     symbols: &[String],
     is_macos: bool,
-    rename_symbol: &dyn Fn(&str) -> Option<String>,
+    rename_symbol: &dyn Fn(&str) -> String,
 ) -> SymbolRenameMaps {
     let mut objcopy_map = HashMap::new();
     let mut bindgen_map = HashMap::new();
@@ -677,21 +812,20 @@ fn build_symbol_rename_maps(
             sym.as_str()
         };
 
-        if let Some(new_c_name) = rename_symbol(c_name) {
-            // objcopy 用: プラットフォーム固有のプレフィックスを再付与する
-            //   macOS: shiguredo_dav1d_open → _shiguredo_dav1d_open
-            //   Linux/Windows: shiguredo_dav1d_open → shiguredo_dav1d_open (変化なし)
-            let new_sym = if is_macos {
-                format!("_{new_c_name}")
-            } else {
-                new_c_name.clone()
-            };
-            objcopy_map.insert(sym.clone(), new_sym.clone());
+        let new_c_name = rename_symbol(c_name);
+        // objcopy 用: プラットフォーム固有のプレフィックスを再付与する
+        //   macOS: shiguredo_dav1d_open → _shiguredo_dav1d_open
+        //   Linux/Windows: shiguredo_dav1d_open → shiguredo_dav1d_open (変化なし)
+        let new_sym = if is_macos {
+            format!("_{new_c_name}")
+        } else {
+            new_c_name.clone()
+        };
+        objcopy_map.insert(sym.clone(), new_sym.clone());
 
-            // bindgen 用: generated_link_name_override は \u{1} プレフィックスを付加して
-            // シンボル名をそのまま使うため、プラットフォーム固有のシンボル名で管理する
-            bindgen_map.insert(c_name.to_string(), new_sym);
-        }
+        // bindgen 用: generated_link_name_override は \u{1} プレフィックスを付加して
+        // シンボル名をそのまま使うため、プラットフォーム固有のシンボル名で管理する
+        bindgen_map.insert(c_name.to_string(), new_sym);
     }
 
     SymbolRenameMaps {
@@ -757,7 +891,7 @@ fn detect_linux_distro() -> String {
             if let Some(version) = line.strip_prefix("VERSION_ID=") {
                 let version = version.trim_matches('"');
                 match version {
-                    "22.04" | "24.04" => return format!("ubuntu-{}", version),
+                    "22.04" | "24.04" | "26.04" => return format!("ubuntu-{}", version),
                     _ => {}
                 }
             }
