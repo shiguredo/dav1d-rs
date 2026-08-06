@@ -33,6 +33,6 @@
 
 ## 解決方法
 
-- `.github/workflows/release.yml` の github-release ジョブに、タグ名と `Cargo.toml` の `package.version` の一致を検証するステップを追加する
-- publish ジョブ（またはその前段）に、全 8 資産の `curl -fsSL` ダウンロードと SHA256 再計算の検証ステップを追加する
-- 2025.1.0 系の資産欠落については、欠落しているバージョンの資産を作り直すか、該当バージョンの yank など方針を決めて対応する
+- `.github/workflows/release.yml` の github-release ジョブに、タグ名と `Cargo.toml` の `package.version` の一致を検証するステップを追加し、Release 作成前に不一致を検出するようにした
+- 配布する全 8 資産の `curl -fsSL` ダウンロードと SHA256 再計算の照合ステップを追加し、アップロード後の破損・欠落を検出するようにした
+- 2025.1.0 系（GitHub Release が存在しないバージョン）の資産欠落は、対応しない方針で決着した（過去分の資産は作らず、今後はリリース時の検証で資産が揃うことを担保する）
