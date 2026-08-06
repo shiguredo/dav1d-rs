@@ -6,6 +6,10 @@
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
 
+## reopened にした理由
+
+- 起票時に誤って `issues/pending/` 直下に作成されていたため、`issues/` 直下の open 状態に戻す
+- 仕様的に対応が難しい、設計判断が必要などの pending にする理由がない
 ## 目的
 
 `DOCS_RS=1` を付けた環境で `cargo check` / `cargo build` が失敗する問題と、DOCS_RS ビルド後に通常ビルドまで壊れ続ける問題を修正する。
