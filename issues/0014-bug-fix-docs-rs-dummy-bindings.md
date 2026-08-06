@@ -1,7 +1,7 @@
 # DOCS_RS 向けダミーバインディングを修正し、DOCS_RS 時のビルドを復旧させる
 
 - Created: 2026-08-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-06
 - Branch: feature/fix-docs-rs-dummy-bindings
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
