@@ -11,6 +11,11 @@
 
 ## develop
 
+## 2026.2.0
+
+**リリース日**: 2026-08-06
+
+
 - [ADD] ubuntu-26.04 / ubuntu-26.04-arm の prebuilt バイナリをサポートする
   - @voluntas
 - [UPDATE] dav1d を 1.5.3 から 1.5.4 に更新する
