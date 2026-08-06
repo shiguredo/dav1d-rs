@@ -30,5 +30,5 @@ dav1d の所有権契約（呼び出し側が参照の所有権を引き継ぐ�
 
 ## 解決方法
 
-- `src/lib.rs` の `Decoder::get_decode_error_data_props()` で、`DataProps` への変換後に `sys::dav1d_data_props_unref(&mut props)` を呼ぶ
-- 必要に応じて、`dav1d_data_props_unref()` が `Dav1dDataProps` を memset する（dav1d の `dav1d_data_unref` と同様）ことを確認してから実装する
+- `src/lib.rs` の `Decoder::get_decode_error_data_props()` で、`DataProps` への変換後に `sys::dav1d_data_props_unref(&mut props)` を呼ぶようにした
+- `dav1d_data_props_unref()` は `Dav1dDataProps` を memset して初期状態に戻すことを dav1d の実装で確認し、コメントに記載した
