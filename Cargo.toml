@@ -24,17 +24,19 @@ exclude = ["fuzz"]
 
 [dependencies]
 
-[dev-dependencies]
-# PSNR テストで AV1 エンコードに使用する AOM バインディング
-shiguredo_aom = "2026.1"
-# PSNR テストで AV1 エンコードに使用する SVT-AV1 バインディング
-shiguredo_svt_av1 = "2026.1"
-
 [build-dependencies]
 # dav1d の C ヘッダーから Rust バインディングを生成する
 bindgen = "0.72"
 # Cargo.toml の [package.metadata.external-dependencies] を読み取る
 shiguredo_toml = "2026.2"
+
+# モバイルでは shiguredo_aom / shiguredo_svt_av1 が prebuilt 未対応であり、
+# cargo test --lib でも dev-dependencies がビルドされるため、モバイル以外に限定する
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dev-dependencies]
+# PSNR テストで AV1 エンコードに使用する AOM バインディング
+shiguredo_aom = "2026.1"
+# PSNR テストで AV1 エンコードに使用する SVT-AV1 バインディング
+shiguredo_svt_av1 = "2026.1"
 
 [features]
 source-build = []
