@@ -24,6 +24,10 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-env-changed=CARGO_FEATURE_SOURCE_BUILD");
     println!("cargo::rerun-if-env-changed=DAV1D_TARGET");
+    println!("cargo::rerun-if-env-changed=IPHONEOS_DEPLOYMENT_TARGET");
+    println!("cargo::rerun-if-env-changed=DEVELOPER_DIR");
+    println!("cargo::rerun-if-env-changed=ANDROID_NDK_HOME");
+    println!("cargo::rerun-if-env-changed=ANDROID_PLATFORM");
     // DOCS_RS の有無で生成物 (ダミー or 実バインディング) が切り替わるため、
     // 環境変数の変更で必ず build.rs を再実行する
     println!("cargo::rerun-if-env-changed=DOCS_RS");
@@ -470,11 +474,29 @@ fn build_from_source(out_dir: &Path, output_bindings_path: &Path) -> PathBuf {
         .map(|v| v == "msvc")
         .unwrap_or(false);
 
+    // モバイル向けの cross file を生成し、bindgen に渡す clang 引数を組み立てる
+    let mobile = configure_mobile_build(&out_build_dir);
+
     let mut meson_cmd = Command::new("meson");
     meson_cmd.arg("setup").arg("--default-library=static");
 
     if is_msvc {
         meson_cmd.arg("--vsenv");
+    }
+
+    // モバイルでは CLI ツールとテストをビルドしない。
+    // iOS では実行ファイルを実行できず、Android でも不要なため。
+    if mobile.cross_file.is_some() {
+        meson_cmd.arg("-Denable_tools=false");
+        meson_cmd.arg("-Denable_tests=false");
+        // Cargo は Apple ターゲット向けに SDKROOT を設定する。これを残すと meson の
+        // ビルドマシン向けサニティチェックが iOS SDK でコンパイルして実行に失敗するため、
+        // cross file で -isysroot を明示している iOS / Android では SDKROOT を外す。
+        meson_cmd.env_remove("SDKROOT");
+    }
+
+    if let Some(cross_file) = &mobile.cross_file {
+        meson_cmd.arg("--cross-file").arg(cross_file);
     }
 
     meson_cmd.arg("..").current_dir(&src_build_dir);
@@ -511,6 +533,7 @@ fn build_from_source(out_dir: &Path, output_bindings_path: &Path) -> PathBuf {
     // 生成されるバインディングに #[link_name = "書き換え後のシンボル名"] が自動付与される。
     bindgen::Builder::default()
         .header(input_header_path.to_str().expect("invalid header path"))
+        .clang_args(&mobile.clang_args)
         .parse_callbacks(Box::new(callbacks))
         .generate()
         .expect("failed to generate bindings")
@@ -518,6 +541,206 @@ fn build_from_source(out_dir: &Path, output_bindings_path: &Path) -> PathBuf {
         .expect("failed to write bindings");
 
     output_lib_dir
+}
+
+// --- モバイル向けビルド設定 ---
+
+/// モバイル向けビルドの設定
+///
+/// モバイルターゲットでは meson の cross file と bindgen の clang 引数に
+/// 同じ SDK / ツールチェーンの設定を渡す必要がある。
+struct MobileBuildConfig {
+    /// meson に渡す cross file のパス (モバイル以外は None)
+    cross_file: Option<PathBuf>,
+    /// bindgen に渡す clang 引数 (モバイル以外は空)
+    clang_args: Vec<String>,
+}
+
+/// モバイル向けの cross file を生成し、bindgen 用の clang 引数を組み立てる
+///
+/// モバイル以外のターゲットでは何も生成せず、空の設定を返す。
+///
+/// dav1d は package/crossfiles/ に iOS / Android 向け cross file を同梱しているが、
+/// SDK のパスと Android API level が固定されているため、実行環境から解決した値で
+/// cross file を生成している。
+///
+/// iOS の最小 OS バージョンは IPHONEOS_DEPLOYMENT_TARGET、Android の API level は
+/// ANDROID_PLATFORM で変更できる。
+fn configure_mobile_build(build_dir: &Path) -> MobileBuildConfig {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS is not set");
+    let target = env::var("TARGET").expect("TARGET is not set");
+
+    match target_os.as_str() {
+        "ios" => configure_ios_build(build_dir, &target),
+        "android" => configure_android_build(build_dir, &target),
+        _ => MobileBuildConfig {
+            cross_file: None,
+            clang_args: Vec::new(),
+        },
+    }
+}
+
+/// iOS 向けの cross file を生成する
+///
+/// Rust のターゲットで実機とシミュレーターを区別する。
+/// 根拠: rustc book の *-apple-ios の Requirements。ターゲットの下限は将来変更される可能性がある。
+fn configure_ios_build(build_dir: &Path, target: &str) -> MobileBuildConfig {
+    let (sdk, arch, simulator_suffix, default_deployment_target, version_flag) = match target {
+        "aarch64-apple-ios" => ("iphoneos", "arm64", "", "13.0", "-miphoneos-version-min"),
+        // arm64 シミュレーターは Rust と Clang のターゲット下限が iOS 14.0
+        "aarch64-apple-ios-sim" => (
+            "iphonesimulator",
+            "arm64",
+            "-simulator",
+            "14.0",
+            "-mios-simulator-version-min",
+        ),
+        "x86_64-apple-ios" => (
+            "iphonesimulator",
+            "x86_64",
+            "-simulator",
+            "13.0",
+            "-mios-simulator-version-min",
+        ),
+        _ => panic!("unsupported iOS target: {target}"),
+    };
+
+    // Meson は Apple arm64 を 'aarch64' として扱うため、clang の -arch (arm64) とは別に変換する。
+    // 'arm64' のまま渡すと dav1d が aarch64 拡張 (dotprod / i8mm / sve2) を検出できず、
+    // 該当する最適化シンボルが生成されない。
+    let cpu_family = if arch == "arm64" { "aarch64" } else { arch };
+
+    let deployment_target = env::var("IPHONEOS_DEPLOYMENT_TARGET")
+        .unwrap_or_else(|_| default_deployment_target.to_string());
+
+    // DEVELOPER_DIR が設定されている環境でも正しい SDK を解決するため xcrun を使用する
+    let output = Command::new("xcrun")
+        .args(["--sdk", sdk, "--show-sdk-path"])
+        .output()
+        .expect("failed to run xcrun. Ensure Xcode is installed");
+    if !output.status.success() {
+        panic!("failed to find iOS SDK: {sdk}");
+    }
+    let sdk_path = String::from_utf8(output.stdout).expect("invalid iOS SDK path");
+    let sdk_path = sdk_path.trim();
+
+    let cross_file = build_dir.join("mobile.meson");
+    fs::write(
+        &cross_file,
+        format!(
+            "\
+[binaries]
+c = ['clang', '-arch', '{arch}', '-isysroot', '{sdk_path}']
+ar = 'ar'
+strip = 'strip'
+
+[built-in options]
+c_args = ['{version_flag}={deployment_target}']
+c_link_args = ['{version_flag}={deployment_target}']
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'darwin'
+cpu_family = '{cpu_family}'
+cpu = '{cpu_family}'
+endian = 'little'
+"
+        ),
+    )
+    .expect("failed to write meson cross file");
+
+    MobileBuildConfig {
+        cross_file: Some(cross_file),
+        clang_args: vec![
+            format!("--target={arch}-apple-ios{deployment_target}{simulator_suffix}"),
+            "-isysroot".to_string(),
+            sdk_path.to_string(),
+        ],
+    }
+}
+
+/// Android 向けの cross file を生成する
+///
+/// NDK のツールチェーンを ANDROID_NDK_HOME から解決する。
+/// 根拠: Android NDK ガイドの Standalone toolchains。
+/// API level の下限は NDK の arm64-v8a / x86_64 のサポート下限に合わせて 21 とする。
+fn configure_android_build(build_dir: &Path, target: &str) -> MobileBuildConfig {
+    let ndk = PathBuf::from(
+        env::var_os("ANDROID_NDK_HOME")
+            .expect("ANDROID_NDK_HOME is not set. Set it to the Android NDK directory"),
+    );
+
+    let (cpu, clang_target) = match target {
+        "aarch64-linux-android" => ("aarch64", "aarch64-linux-android"),
+        "x86_64-linux-android" => ("x86_64", "x86_64-linux-android"),
+        _ => panic!("unsupported Android target: {target}"),
+    };
+
+    let platform = env::var("ANDROID_PLATFORM").unwrap_or_else(|_| "21".to_string());
+    // android-21 形式も受け付ける
+    let api_level = platform
+        .strip_prefix("android-")
+        .unwrap_or(&platform)
+        .parse::<u32>()
+        .expect("ANDROID_PLATFORM must be a numeric API level or android-<API level>");
+    // NDK が下限未満の API level を引き上げると bindgen と食い違うため、ここで拒否する
+    assert!(
+        api_level >= 21,
+        "ANDROID_PLATFORM must be at least API level 21"
+    );
+
+    // NDK の prebuilt ツールチェーンはホスト OS ごとにディレクトリが分かれる。
+    // Apple Silicon Mac でも NDK が提供するのは darwin-x86_64 のみ。
+    let host_tag = match env::consts::OS {
+        "linux" => "linux-x86_64",
+        "macos" => "darwin-x86_64",
+        "windows" => "windows-x86_64",
+        os => panic!("unsupported Android NDK host: {os}"),
+    };
+    let toolchain = ndk.join("toolchains/llvm/prebuilt").join(host_tag);
+    let clang = toolchain.join("bin").join(exe_name("clang"));
+    let ar = toolchain.join("bin").join(exe_name("llvm-ar"));
+    let strip = toolchain.join("bin").join(exe_name("llvm-strip"));
+    let sysroot = toolchain.join("sysroot");
+
+    // NDK のターゲット別ラッパー (aarch64-linux-android21-clang 等) はホストによっては
+    // 拡張子が異なるため、clang 本体に --target と --sysroot を渡す形に統一する
+    let cross_file = build_dir.join("mobile.meson");
+    fs::write(
+        &cross_file,
+        format!(
+            "\
+[binaries]
+c = ['{clang}', '--target={clang_target}{api_level}', '--sysroot={sysroot}']
+ar = '{ar}'
+strip = '{strip}'
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'android'
+cpu_family = '{cpu}'
+cpu = '{cpu}'
+endian = 'little'
+",
+            clang = clang.display(),
+            ar = ar.display(),
+            strip = strip.display(),
+            sysroot = sysroot.display(),
+        ),
+    )
+    .expect("failed to write meson cross file");
+
+    MobileBuildConfig {
+        cross_file: Some(cross_file),
+        clang_args: vec![
+            format!("--target={clang_target}{api_level}"),
+            format!("--sysroot={}", sysroot.display()),
+        ],
+    }
 }
 
 // --- シンボル書き換え ---
@@ -529,13 +752,13 @@ fn build_from_source(out_dir: &Path, output_bindings_path: &Path) -> PathBuf {
 // rust-toolchain.toml に components = ["llvm-tools"] の記載が必要。
 //
 // プラットフォームごとのシンボル形式の違い:
-//   - macOS (Mach-O): シンボル先頭に `_` が付く (例: _dav1d_open)
-//   - Linux (ELF): 先頭 `_` なし (例: dav1d_open)
+//   - macOS / iOS (Mach-O): シンボル先頭に `_` が付く (例: _dav1d_open)
+//   - Linux / Android (ELF): 先頭 `_` なし (例: dav1d_open)
 //   - Windows x64 (COFF): 先頭 `_` なし (例: dav1d_open)
 //
 // bindgen の generated_link_name_override は返した文字列に \u{1} プレフィックスを
 // 自動付加する。\u{1} はコンパイラに「この名前をそのまま使え（マングリングするな）」と
-// 指示するため、プラットフォーム固有のシンボル名（macOS なら _shiguredo_dav1d_open）を
+// 指示するため、プラットフォーム固有のシンボル名（macOS / iOS なら _shiguredo_dav1d_open）を
 // そのまま返す必要がある。
 
 /// llvm-nm / llvm-objcopy のパスを保持する
@@ -552,14 +775,14 @@ struct LlvmTools {
 struct SymbolRenameMaps {
     /// llvm-objcopy の --redefine-syms 用マップ
     ///
-    /// キー: 元のシンボル名 (例: macOS なら _dav1d_open、Linux なら dav1d_open)
-    /// 値: 書き換え後のシンボル名 (例: macOS なら _shiguredo_dav1d_open)
+    /// キー: 元のシンボル名 (例: macOS / iOS なら _dav1d_open、Linux / Android なら dav1d_open)
+    /// 値: 書き換え後のシンボル名 (例: macOS / iOS なら _shiguredo_dav1d_open)
     objcopy_map: HashMap<String, String>,
 
     /// bindgen の #[link_name] 用マップ
     ///
     /// キー: C シンボル名 (プラットフォーム非依存、例: dav1d_open)
-    /// 値: 書き換え後のシンボル名 (プラットフォーム依存、例: macOS なら _shiguredo_dav1d_open)
+    /// 値: 書き換え後のシンボル名 (プラットフォーム依存、例: macOS / iOS なら _shiguredo_dav1d_open)
     ///
     /// bindgen は \u{1} プレフィックスを付加してマングリングを抑制するため、
     /// 値にはプラットフォーム固有のシンボル名を格納する必要がある。
@@ -602,10 +825,10 @@ fn rewrite_symbols(lib_dir: &Path, out_dir: &Path) -> SymbolLinkNameCallbacks {
     let tools = discover_llvm_tools();
     let lib_path = find_static_library(lib_dir);
 
-    // macOS の Mach-O ではシンボル先頭に `_` が付くため、
+    // macOS / iOS の Mach-O ではシンボル先頭に `_` が付くため、
     // プラットフォーム判定してリネームマップの生成時に考慮する
-    let is_macos = env::var("CARGO_CFG_TARGET_OS")
-        .map(|v| v == "macos")
+    let is_macho = env::var("CARGO_CFG_TARGET_VENDOR")
+        .map(|v| v == "apple")
         .unwrap_or(false);
 
     // シンボル名の変換ルール
@@ -625,7 +848,7 @@ fn rewrite_symbols(lib_dir: &Path, out_dir: &Path) -> SymbolLinkNameCallbacks {
 
     // 全定義済み外部シンボルを収集してリネームマップを生成する
     let symbols = collect_defined_external_symbols(&tools.nm, &lib_path);
-    let maps = build_symbol_rename_maps(&symbols, is_macos, &rename_symbol);
+    let maps = build_symbol_rename_maps(&symbols, is_macho, &rename_symbol);
 
     // マップファイルを書き出してシンボルを書き換える
     let map_file = out_dir.join("symbol_rename_map.txt");
@@ -766,7 +989,7 @@ fn collect_defined_external_symbols(nm_path: &Path, lib_path: &Path) -> Vec<Stri
 /// llvm-nm の --format=just-symbols 出力にはオブジェクトファイル名 (dav1d.c.o: 等) も
 /// 含まれるため、この関数でシンボル名のみをフィルタリングする。
 ///
-/// macOS の Mach-O ではシンボル先頭に `_` が付くため、`_` で始まる文字列も受け入れる。
+/// macOS / iOS の Mach-O ではシンボル先頭に `_` が付くため、`_` で始まる文字列も受け入れる。
 ///
 /// NASM が生成する x86_64 向けシンボルには `.` が含まれる場合がある
 /// (例: dav1d_cdef_dir_8bpc_avx2.main)。これらもリネーム対象にするため `.` を許可する。
@@ -786,7 +1009,7 @@ fn is_symbol_name(s: &str) -> bool {
 /// 2 つのマップを生成する理由:
 ///
 /// objcopy_map: ライブラリバイナリ内の実シンボル名を書き換えるためのマップ。
-///   macOS では _dav1d_open → _shiguredo_dav1d_open のようにプラットフォーム固有の
+///   macOS / iOS では _dav1d_open → _shiguredo_dav1d_open のようにプラットフォーム固有の
 ///   `_` プレフィックスを含む形で管理する。
 ///
 /// bindgen_map: Rust バインディングの #[link_name] に使うマップ。
@@ -796,7 +1019,7 @@ fn is_symbol_name(s: &str) -> bool {
 ///   抑制するため、プラットフォーム固有の名前を直接返す必要がある。
 fn build_symbol_rename_maps(
     symbols: &[String],
-    is_macos: bool,
+    is_macho: bool,
     rename_symbol: &dyn Fn(&str) -> String,
 ) -> SymbolRenameMaps {
     let mut objcopy_map = HashMap::new();
@@ -804,9 +1027,9 @@ fn build_symbol_rename_maps(
 
     for sym in symbols {
         // プラットフォーム固有のプレフィックスを除去して C シンボル名を取得する
-        //   macOS: _dav1d_open → dav1d_open
-        //   Linux/Windows: dav1d_open → dav1d_open (変化なし)
-        let c_name = if is_macos {
+        //   macOS / iOS: _dav1d_open → dav1d_open
+        //   Linux / Android / Windows: dav1d_open → dav1d_open (変化なし)
+        let c_name = if is_macho {
             sym.strip_prefix('_').unwrap_or(sym)
         } else {
             sym.as_str()
@@ -814,9 +1037,9 @@ fn build_symbol_rename_maps(
 
         let new_c_name = rename_symbol(c_name);
         // objcopy 用: プラットフォーム固有のプレフィックスを再付与する
-        //   macOS: shiguredo_dav1d_open → _shiguredo_dav1d_open
-        //   Linux/Windows: shiguredo_dav1d_open → shiguredo_dav1d_open (変化なし)
-        let new_sym = if is_macos {
+        //   macOS / iOS: shiguredo_dav1d_open → _shiguredo_dav1d_open
+        //   Linux / Android / Windows: shiguredo_dav1d_open → shiguredo_dav1d_open (変化なし)
+        let new_sym = if is_macho {
             format!("_{new_c_name}")
         } else {
             new_c_name.clone()
@@ -874,6 +1097,21 @@ fn get_target_platform() -> String {
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let rust_target = env::var("TARGET").expect("TARGET is not set");
+
+    // 同じ OS とアーキテクチャでも、Catalyst や x86 の Android は別の ABI になる。
+    // prebuilt と一致するターゲットだけを受け入れ、異なる ABI への誤リンクを防ぐ。
+    if target_os == "ios" || target_os == "android" {
+        return match rust_target.as_str() {
+            "aarch64-apple-ios" => "ios_arm64",
+            "aarch64-apple-ios-sim" => "ios-sim_arm64",
+            "x86_64-apple-ios" => "ios-sim_x86_64",
+            "aarch64-linux-android" => "android_arm64",
+            "x86_64-linux-android" => "android_x86_64",
+            _ => panic!("unsupported mobile target: {rust_target}"),
+        }
+        .to_string();
+    }
 
     match (target_os.as_str(), target_arch.as_str()) {
         ("linux", "x86_64") => format!("{}_x86_64", detect_linux_distro()),

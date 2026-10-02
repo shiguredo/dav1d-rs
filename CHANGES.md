@@ -11,6 +11,9 @@
 
 ## develop
 
+- [ADD] iOS / Android 向けの prebuilt バイナリをサポートする
+  - @voluntas
+
 ## 2026.2.0
 
 **リリース日**: 2026-08-06

@@ -1,3 +1,7 @@
+// モバイルターゲットでは PSNR テスト用の dev-dependencies (shiguredo_aom /
+// shiguredo_svt_av1) が prebuilt 未対応のため、テスト全体を無効化する
+#![cfg(not(any(target_os = "ios", target_os = "android")))]
+
 use shiguredo_dav1d::{Decoder, DecoderConfig, PixelLayout};
 
 // ============================================================================
