@@ -45,6 +45,13 @@ Please read <https://github.com/shiguredo/oss> before use.
 macOS 26 と macOS 15 は同一の prebuilt バイナリ (`macos_arm64`) を共用し、
 Windows 11 と Windows Server 2025 も同一の prebuilt バイナリ (`windows_x86_64`) を共用する。
 
+### iOS / Android 向けの対象
+
+- iOS 13.0 以降 arm64 (実機)
+- iOS 14.0 以降 arm64 (シミュレーター)
+- iOS 13.0 以降 x86_64 (シミュレーター)
+- Android API level 21 以降 arm64-v8a / x86_64
+
 ### ソースビルド時の追加要件
 
 - Git
@@ -65,6 +72,8 @@ pip install meson
 choco install ninja nasm -y
 ```
 
+iOS 向けビルドには Xcode が、Android 向けビルドには Android NDK が必要です。
+
 ## ビルド
 
 デフォルトでは GitHub Releases から prebuilt バイナリをダウンロードしてビルドします。
@@ -73,6 +82,28 @@ choco install ninja nasm -y
 cargo build
 ```
 
+### iOS / Android 向け prebuilt
+
+Cargo のターゲットに応じて、以下のアーカイブを自動選択します。
+各アーカイブにはシンボル書き換え済みの `lib/libdav1d.a`、`bindings.rs`、dav1d のライセンスを収録し、SHA256 チェックサムを添付します。
+
+| 対象 | Rust ターゲット | アーカイブ名 |
+| --- | --- | --- |
+| iOS 実機 arm64 | `aarch64-apple-ios` | `dav1d-ios_arm64.tar.gz` |
+| iOS シミュレーター arm64 | `aarch64-apple-ios-sim` | `dav1d-ios-sim_arm64.tar.gz` |
+| iOS シミュレーター x86_64 | `x86_64-apple-ios` | `dav1d-ios-sim_x86_64.tar.gz` |
+| Android arm64-v8a | `aarch64-linux-android` | `dav1d-android_arm64.tar.gz` |
+| Android x86_64 | `x86_64-linux-android` | `dav1d-android_x86_64.tar.gz` |
+
+モバイル向けの成果物は、対応を追加したバージョンの GitHub Release から提供します。
+
+```bash
+rustup target add aarch64-apple-ios
+IPHONEOS_DEPLOYMENT_TARGET=13.0 cargo build --target aarch64-apple-ios
+```
+
+アプリケーションのリンクには、iOS では Xcode と各ターゲットの下限以上の `IPHONEOS_DEPLOYMENT_TARGET` 設定、Android では Android NDK と対象 ABI のリンカー設定が必要です。
+
 ### ソースからビルド
 
 dav1d をソースからビルドする場合は `source-build` feature を有効にしてください。
@@ -80,6 +111,26 @@ dav1d をソースからビルドする場合は `source-build` feature を有�
 ```bash
 cargo build --features source-build
 ```
+
+iOS / Android では SDK とツールチェーンを環境変数で指定します。
+
+```bash
+# iOS (実機)
+IPHONEOS_DEPLOYMENT_TARGET=13.0 cargo build --target aarch64-apple-ios --features source-build
+
+# iOS (arm64 シミュレーター)
+IPHONEOS_DEPLOYMENT_TARGET=14.0 cargo build --target aarch64-apple-ios-sim --features source-build
+
+# Android (arm64-v8a、Linux ホストの例)
+export ANDROID_NDK_HOME=/path/to/android-ndk
+export ANDROID_PLATFORM=21
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+rustup target add aarch64-linux-android
+cargo build --target aarch64-linux-android --features source-build
+```
+
+`IPHONEOS_DEPLOYMENT_TARGET` を指定しない場合は、実機と x86_64 シミュレーターが `13.0`、arm64 シミュレーターが `14.0` です。
+`ANDROID_PLATFORM` は `21` 以上を指定でき、未指定の場合は `21` です。
 
 ### docs.rs 向けビルド
 
@@ -245,6 +296,9 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 | 変数 | 説明 |
 |---|---|
 | `DAV1D_TARGET` | prebuilt バイナリのプラットフォーム名を明示的に指定する |
+| `IPHONEOS_DEPLOYMENT_TARGET` | iOS 向けビルドの最小 OS バージョン (未指定時は実機 / x86_64 シミュレーターが 13.0、arm64 シミュレーターが 14.0) |
+| `ANDROID_NDK_HOME` | Android 向けビルドで使用する Android NDK のディレクトリ |
+| `ANDROID_PLATFORM` | Android 向けビルドの最小 API level (未指定時は 21) |
 
 ## リリース手順
 
