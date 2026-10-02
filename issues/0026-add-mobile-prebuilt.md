@@ -1,7 +1,7 @@
 # iOS / Android 向けの prebuilt を追加する
 
 - Created: 2026-10-03
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-10-03
 - Branch: feature/add-mobile-prebuilt
 - Polished: {YYYY-MM-DD}
 
@@ -70,3 +70,25 @@ dav1d 1.5.4 をローカルの meson 1.11 + Xcode 26.5 / NDK r29 でクロスビ
 - GitHub Actions の CI でモバイル向けビルドとリンクの検証が通る
 - 次回リリースでアーカイブとチェックサムのアップロード、公開された prebuilt の自動選択とリンクの検証、crates.io への公開の順に進むワークフローを構成し、検証に失敗した場合は `publish` を開始しない
 - 既存の単体テスト、PBT、フォーマット、Clippy が通る
+
+## 解決方法
+
+- `build.rs` に `configure_mobile_build` を追加し、iOS は `xcrun` で解決した Xcode SDK、Android は `ANDROID_NDK_HOME` の NDK ツールチェーンを使う meson cross file を生成するようにした
+  - iOS の最小 OS バージョンは `IPHONEOS_DEPLOYMENT_TARGET`、Android の API level は `ANDROID_PLATFORM` で指定でき、`ANDROID_PLATFORM` は 21 未満を拒否する
+  - meson には `--cross-file` と `-Denable_tools=false -Denable_tests=false` を渡し、bindgen には同じ SDK / ツールチェーンの clang 引数を渡す
+  - Apple の arm64 は clang が `arm64`、meson が `aarch64` を期待するため、cross file の `cpu_family` を `aarch64` に変換する (変換しないと dotprod / i8mm / sve2 の最適化シンボルが生成されない)
+- `get_target_platform` に iOS / Android の 5 ターゲットを追加し、`TARGET` の完全一致で誤った ABI へのリンクを防ぐようにした
+- `rewrite_symbols` の Mach-O 判定を `CARGO_CFG_TARGET_OS == "macos"` から `CARGO_CFG_TARGET_VENDOR == "apple"` に変更した
+- dev-dependencies の `shiguredo_aom` / `shiguredo_svt_av1` をモバイル以外に限定し、PSNR テストをモバイルで無効化した (`cargo test --lib` は dev-dependencies もビルドするため)
+- `.github/workflows/mobile.yml` を追加して CI とリリースで共用し、`ci.yml` から呼び出すようにした
+- リリースでは `build-mobile-prebuilt` でアーカイブをアップロードし、`publish` の前に配布する全 13 資産の SHA256 を検証するようにした
+- `README.md` に iOS / Android の対象とビルド手順、環境変数を追記し、`CHANGES.md` に [ADD] を記載した
+
+### 検証結果
+
+- 全 5 ターゲット (ios_arm64, ios-sim_arm64, ios-sim_x86_64, android_arm64, android_x86_64) でソースビルドと Rust のリンクに成功した
+- 全定義済み外部シンボルが、Mach-O 固有の先頭 `_` を除いて `shiguredo_dav1d_` プレフィックスを持つことを確認した
+- arm64 で dotprod / i8mm / sve2 が有効になっていることを確認した
+- ワークフローのアーカイブ生成処理を使い、SHA256 の一致と展開物の一致を確認した
+- ホストの全テスト、Clippy、フォーマット、tombi、actionlint が通過した
+- GitHub Actions の CI はこの作業ブランチの PR で実行する
