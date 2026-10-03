@@ -34,9 +34,9 @@ shiguredo_toml = "2026.2"
 # cargo test --lib でも dev-dependencies がビルドされるため、モバイル以外に限定する
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dev-dependencies]
 # PSNR テストで AV1 エンコードに使用する AOM バインディング
-shiguredo_aom = "2026.1"
+shiguredo_aom = "2026.2"
 # PSNR テストで AV1 エンコードに使用する SVT-AV1 バインディング
-shiguredo_svt_av1 = "2026.1"
+shiguredo_svt_av1 = "2026.2"
 
 [features]
 source-build = []
