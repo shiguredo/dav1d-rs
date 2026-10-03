@@ -11,10 +11,16 @@
 
 ## develop
 
+## 2026.3.0
+
+**リリース日**: 2026-10-03
+
+- [ADD] iOS / Android 向けの prebuilt バイナリをサポートする
+  - @voluntas
+
 ## 2026.2.0
 
 **リリース日**: 2026-08-06
-
 
 - [ADD] ubuntu-26.04 / ubuntu-26.04-arm の prebuilt バイナリをサポートする
   - @voluntas

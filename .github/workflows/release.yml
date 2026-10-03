@@ -183,8 +183,17 @@ jobs:
             dav1d-${{ matrix.target }}.tar.gz.sha256 \
             --clobber
 
+  build-mobile-prebuilt:
+    name: Build mobile prebuilt
+    needs: github-release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/mobile.yml
+    with:
+      release-version: ${{ needs.github-release.outputs.version }}
+
   publish:
-    needs: [github-release, build-prebuilt]
+    needs: [github-release, build-prebuilt, build-mobile-prebuilt]
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -192,13 +201,13 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      # 配布する全 8 資産のダウンロードと SHA256 照合を行い、
+      # 配布する全 12 資産のダウンロードと SHA256 照合を行い、
       # アップロード後の破損・欠落を検出する
       - name: Verify all prebuilt assets
         shell: bash
         run: |
           VERSION="${{ needs.github-release.outputs.version }}"
-          TARGETS="ubuntu-26.04_x86_64 ubuntu-26.04_arm64 ubuntu-24.04_x86_64 ubuntu-24.04_arm64 ubuntu-22.04_x86_64 ubuntu-22.04_arm64 macos_arm64 windows_x86_64"
+          TARGETS="ubuntu-26.04_x86_64 ubuntu-26.04_arm64 ubuntu-24.04_x86_64 ubuntu-24.04_arm64 ubuntu-22.04_x86_64 ubuntu-22.04_arm64 macos_arm64 windows_x86_64 ios_arm64 ios-sim_arm64 android_arm64 android_x86_64"
           BASE_URL="https://github.com/shiguredo/dav1d-rs/releases/download/${VERSION}"
           for target in $TARGETS; do
             curl -fsSL -o "dav1d-${target}.tar.gz" "${BASE_URL}/dav1d-${target}.tar.gz"
@@ -219,7 +228,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   slack_notify:
-    needs: [github-release, build-prebuilt, publish]
+    needs: [github-release, build-prebuilt, build-mobile-prebuilt, publish]
     timeout-minutes: 20
     runs-on: ubuntu-slim
     if: ${{ always() }}

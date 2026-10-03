@@ -135,6 +135,13 @@ jobs:
           toolchain: stable
       - run: cargo check
 
+  # モバイル向けビルドとリンク検証 (iOS / Android)
+  mobile:
+    name: Mobile prebuilt
+    permissions:
+      contents: read
+    uses: ./.github/workflows/mobile.yml
+
   # docs.rs 向けビルド確認
   docs-rs:
     name: docs.rs
@@ -152,6 +159,7 @@ jobs:
       - fmt-clippy
       - prebuilt
       - test
+      - mobile
       - docs-rs
     runs-on: ubuntu-slim
     if: always()
