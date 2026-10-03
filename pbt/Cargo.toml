@@ -2,6 +2,7 @@
 name = "shiguredo_dav1d_pbt"
 version = "0.0.0"
 edition = "2024"
+rust-version = "1.93"
 publish = false
 
 [dependencies]
@@ -9,5 +10,5 @@ publish = false
 shiguredo_dav1d = { path = ".." }
 
 [dev-dependencies]
-# PBT (Property-Based Testing) のフレームワーク
-proptest = "1.6"
+# Property-Based Testing のフレームワーク
+noprop = "0.2"

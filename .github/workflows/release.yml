@@ -79,8 +79,6 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - run: rustup update stable
-
       - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential meson ninja-build nasm
@@ -96,6 +94,7 @@ jobs:
           choco install ninja nasm -y
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      # ツールチェーンは rust-toolchain.toml で MSRV に固定している
       - name: Build with source-build
         run: cargo build --release --features source-build
 

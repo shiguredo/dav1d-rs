@@ -11,6 +11,13 @@
 
 ## develop
 
+### misc
+
+- [UPDATE] `rust-toolchain.toml` の channel を MSRV (1.93) に固定し、CI も同ツールチェーンで実行する
+  - @voluntas
+- [UPDATE] PBT のフレームワークを proptest から noprop に変更し、CI でも pbt のテストを実行する
+  - @voluntas
+
 ## 2026.3.0
 
 **リリース日**: 2026-10-03
