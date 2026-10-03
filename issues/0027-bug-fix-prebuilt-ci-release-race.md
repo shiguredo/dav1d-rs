@@ -1,7 +1,7 @@
 # prebuilt CI がリリース資産のアップロードと競合するのを防ぐ
 
 - Created: 2026-10-03
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-10-03
 - Branch: feature/fix-prebuilt-ci-race
 - Polished: {YYYY-MM-DD}
 - Reporter: @voluntas
@@ -32,6 +32,6 @@
 
 ## 解決方法
 
-- `.github/workflows/ci.yml` の `prebuilt` ジョブに matrix の `target` と `DAV1D_TARGET` を追加する
-- 資産が公開されるまで最大 15 分ポーリングする `Wait for prebuilt assets` ステップを `cargo check` の前に追加する
-- 待機分を見込み `timeout-minutes` を 15 から 30 に引き上げる
+- `.github/workflows/ci.yml` の `prebuilt` ジョブに matrix の `target` を追加し、`DAV1D_TARGET` で待機対象と build.rs のダウンロード対象を一致させた
+- 資産 (`.tar.gz` と `.sha256`) が公開されるまで最大 15 分ポーリングする `Wait for prebuilt assets` ステップを `cargo check` の前に追加した
+- 待機分を見込み `timeout-minutes` を 15 から 30 に引き上げた
