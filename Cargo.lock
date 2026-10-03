@@ -414,11 +414,12 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_aom"
-version = "2026.2.0"
+version = "2026.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d3c9dce08e52ace5e5711b656673e58057b12af61055a4cd6b10fcec2d545c"
+checksum = "5af49c6f3d13251d6b4a0924b2cad4b56a0ae0da107c0d36da0a5381df3b406e"
 dependencies = [
  "bindgen",
+ "cc",
  "shiguredo_cmake",
  "shiguredo_toml",
 ]
@@ -435,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_dav1d"
-version = "2026.2.0"
+version = "2026.3.0"
 dependencies = [
  "bindgen",
  "shiguredo_aom",

@@ -2,8 +2,9 @@
 name: shiguredo-dav1d
 description: >-
   時雨堂の dav1d (AV1) Rust バインディング shiguredo_dav1d を利用するためのリファレンス。
-  Cargo への追加、prebuilt / source-build の選択、AV1 デコード、EAGAIN 処理、
-  DecodedFrame のプレーン / メタデータ、シーケンスヘッダー解析、フィルムグレインに関する質問時に使用。
+  Cargo への追加、prebuilt / source-build の選択、iOS / Android 向けビルド、
+  AV1 デコード、EAGAIN 処理、DecodedFrame のプレーン / メタデータ、
+  シーケンスヘッダー解析、フィルムグレインに関する質問時に使用。
 ---
 
 # shiguredo_dav1d
@@ -13,7 +14,7 @@ description: >-
 ## バージョン情報
 
 - crate 名: `shiguredo_dav1d`
-- crate バージョン: 2026.2.0
+- crate バージョン: 2026.3.0
 - dav1d バージョン: 1.5.4
 - Rust Edition: 2024
 - 最小 Rust バージョン: 1.93
@@ -31,6 +32,7 @@ description: >-
 - デコーダーを生成しないシーケンスヘッダー解析
 - フィルムグレインの自動適用と後段適用
 - シーク後のデコーダー状態のリセット
+- iOS / Android を含む対応プラットフォームの prebuilt バイナリ
 
 dav1d はソフトウェアデコーダー専用である。
 AV1 エンコードとハードウェアアクセラレーションは提供しない。
@@ -45,7 +47,7 @@ AV1 エンコードとハードウェアアクセラレーションは提供し�
 ```toml
 [dependencies]
 # AV1 デコードに使用する
-shiguredo_dav1d = "2026.2"
+shiguredo_dav1d = "2026.3"
 ```
 
 dav1d をソースからビルドする場合は、`source-build` feature を有効にする。
@@ -53,7 +55,7 @@ dav1d をソースからビルドする場合は、`source-build` feature を有
 ```toml
 [dependencies]
 # dav1d をソースからビルドして AV1 デコードに使用する
-shiguredo_dav1d = { version = "2026.2", features = ["source-build"] }
+shiguredo_dav1d = { version = "2026.3", features = ["source-build"] }
 ```
 
 ## ビルド方式
@@ -76,6 +78,9 @@ cargo build
 | Ubuntu 22.04 | x86_64 / arm64 |
 | macOS 26 / 15 | arm64 |
 | Windows 11 / Windows Server 2025 | x86_64 |
+| iOS 13.0 以降 (実機) | arm64 |
+| iOS 14.0 以降 (シミュレーター) | arm64 |
+| Android API level 21 以降 | arm64-v8a / x86_64 |
 
 デフォルトビルドでは `curl`、`tar` と OS ごとの SHA-256 計算コマンドを使用する。
 
@@ -95,9 +100,38 @@ DAV1D_TARGET=ubuntu-24.04_x86_64 cargo build
 - `ubuntu-22.04_arm64`
 - `macos_arm64`
 - `windows_x86_64`
+- `ios_arm64`
+- `ios-sim_arm64`
+- `android_arm64`
+- `android_x86_64`
 
 `DAV1D_TARGET` は自動判定を上書きする。
 実行環境と ABI が一致する値を指定する。
+
+### iOS / Android 向け prebuilt
+
+Cargo のターゲットに応じて、iOS / Android 向けの prebuilt アーカイブを自動選択する。
+アーカイブにはシンボル書き換え済みの `lib/libdav1d.a`、`bindings.rs`、dav1d のライセンスが含まれる。
+これらの成果物は 2026.3.0 以降の GitHub Release から提供される。
+
+| 対象 | Rust ターゲット | アーカイブ名 |
+|---|---|---|
+| iOS 実機 arm64 | `aarch64-apple-ios` | `dav1d-ios_arm64.tar.gz` |
+| iOS シミュレーター arm64 | `aarch64-apple-ios-sim` | `dav1d-ios-sim_arm64.tar.gz` |
+| Android arm64-v8a | `aarch64-linux-android` | `dav1d-android_arm64.tar.gz` |
+| Android x86_64 | `x86_64-linux-android` | `dav1d-android_x86_64.tar.gz` |
+
+```bash
+# iOS 実機
+rustup target add aarch64-apple-ios
+IPHONEOS_DEPLOYMENT_TARGET=13.0 cargo build --target aarch64-apple-ios
+
+# Android arm64-v8a
+rustup target add aarch64-linux-android
+cargo build --target aarch64-linux-android
+```
+
+iOS では Xcode、Android では Android NDK と対象 ABI のリンカー設定が必要である。
 
 ### ソースビルド
 
@@ -116,6 +150,8 @@ cargo build
 - Ninja
 - NASM
 - rustup の `llvm-tools` コンポーネント
+- iOS では Xcode
+- Android では Android NDK
 - Windows では Visual Studio と MSVC
 
 ```bash
@@ -132,6 +168,26 @@ pip install meson
 choco install ninja nasm -y
 rustup component add llvm-tools
 ```
+
+iOS / Android では SDK とツールチェーンを環境変数で指定する。
+
+```bash
+# iOS (実機)
+IPHONEOS_DEPLOYMENT_TARGET=13.0 cargo build --target aarch64-apple-ios --features source-build
+
+# iOS (arm64 シミュレーター)
+IPHONEOS_DEPLOYMENT_TARGET=14.0 cargo build --target aarch64-apple-ios-sim --features source-build
+
+# Android (arm64-v8a、Linux ホストの例)
+export ANDROID_NDK_HOME=/path/to/android-ndk
+export ANDROID_PLATFORM=21
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+rustup target add aarch64-linux-android
+cargo build --target aarch64-linux-android --features source-build
+```
+
+`IPHONEOS_DEPLOYMENT_TARGET` を指定しない場合は、実機が `13.0`、arm64 シミュレーターが `14.0` になる。
+`ANDROID_PLATFORM` は `21` 以上を指定でき、未指定の場合は `21` になる。
 
 ## 基本的なデコード
 

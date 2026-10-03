@@ -321,13 +321,13 @@ fn encode_with_svt_av1_16bit(
             v: &v_bytes,
         };
         encoder.encode(&frame, &options).expect("エンコードに失敗");
-        while let Some(encoded) = encoder.next_frame() {
+        while let Some(encoded) = encoder.next_frame().expect("next_frame に失敗") {
             packets.push(encoded.data().to_vec());
         }
     }
 
     encoder.finish().expect("finish に失敗");
-    while let Some(encoded) = encoder.next_frame() {
+    while let Some(encoded) = encoder.next_frame().expect("next_frame に失敗") {
         packets.push(encoded.data().to_vec());
     }
 
@@ -433,13 +433,13 @@ fn encode_with_svt_av1(
     for (y, u, v) in frames {
         let frame = shiguredo_svt_av1::FrameData::I420 { y, u, v };
         encoder.encode(&frame, &options).expect("エンコードに失敗");
-        while let Some(encoded) = encoder.next_frame() {
+        while let Some(encoded) = encoder.next_frame().expect("next_frame に失敗") {
             packets.push(encoded.data().to_vec());
         }
     }
 
     encoder.finish().expect("finish に失敗");
-    while let Some(encoded) = encoder.next_frame() {
+    while let Some(encoded) = encoder.next_frame().expect("next_frame に失敗") {
         packets.push(encoded.data().to_vec());
     }
 

@@ -49,7 +49,6 @@ Windows 11 と Windows Server 2025 も同一の prebuilt バイナリ (`windows_
 
 - iOS 13.0 以降 arm64 (実機)
 - iOS 14.0 以降 arm64 (シミュレーター)
-- iOS 13.0 以降 x86_64 (シミュレーター)
 - Android API level 21 以降 arm64-v8a / x86_64
 
 ### ソースビルド時の追加要件
@@ -91,11 +90,10 @@ Cargo のターゲットに応じて、以下のアーカイブを自動選択�
 | --- | --- | --- |
 | iOS 実機 arm64 | `aarch64-apple-ios` | `dav1d-ios_arm64.tar.gz` |
 | iOS シミュレーター arm64 | `aarch64-apple-ios-sim` | `dav1d-ios-sim_arm64.tar.gz` |
-| iOS シミュレーター x86_64 | `x86_64-apple-ios` | `dav1d-ios-sim_x86_64.tar.gz` |
 | Android arm64-v8a | `aarch64-linux-android` | `dav1d-android_arm64.tar.gz` |
 | Android x86_64 | `x86_64-linux-android` | `dav1d-android_x86_64.tar.gz` |
 
-モバイル向けの成果物は、対応を追加したバージョンの GitHub Release から提供します。
+モバイル向けの成果物は 2026.3.0 以降の GitHub Release から提供します。
 
 ```bash
 rustup target add aarch64-apple-ios
@@ -129,7 +127,7 @@ rustup target add aarch64-linux-android
 cargo build --target aarch64-linux-android --features source-build
 ```
 
-`IPHONEOS_DEPLOYMENT_TARGET` を指定しない場合は、実機と x86_64 シミュレーターが `13.0`、arm64 シミュレーターが `14.0` です。
+`IPHONEOS_DEPLOYMENT_TARGET` を指定しない場合は、実機が `13.0`、arm64 シミュレーターが `14.0` です。
 `ANDROID_PLATFORM` は `21` 以上を指定でき、未指定の場合は `21` です。
 
 ### docs.rs 向けビルド
@@ -296,7 +294,7 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 | 変数 | 説明 |
 |---|---|
 | `DAV1D_TARGET` | prebuilt バイナリのプラットフォーム名を明示的に指定する |
-| `IPHONEOS_DEPLOYMENT_TARGET` | iOS 向けビルドの最小 OS バージョン (未指定時は実機 / x86_64 シミュレーターが 13.0、arm64 シミュレーターが 14.0) |
+| `IPHONEOS_DEPLOYMENT_TARGET` | iOS 向けビルドの最小 OS バージョン (未指定時は実機が 13.0、arm64 シミュレーターが 14.0) |
 | `ANDROID_NDK_HOME` | Android 向けビルドで使用する Android NDK のディレクトリ |
 | `ANDROID_PLATFORM` | Android 向けビルドの最小 API level (未指定時は 21) |
 
@@ -310,7 +308,7 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 python3 canary.py
 ```
 
-- バージョンは `2026.2.0-canary.2` → `2026.2.0-canary.3` のように更新される
+- バージョンは `2026.3.0-canary.2` → `2026.3.0-canary.3` のように更新される
 - タグのプッシュにより、GitHub Actions の `release.yml` が GitHub Release の作成、全プラットフォームの prebuilt ビルド、crates.io への公開まで自動実行する
 - タグのプッシュは `develop` または `release/` ブランチからのみ実行できる
 
@@ -319,7 +317,7 @@ python3 canary.py
 1. `release/YYYY.M.P` ブランチを `develop` から作成する
 
 ```bash
-git checkout -b release/2026.2.0 develop
+git checkout -b release/2026.3.0 develop
 ```
 
 2. `canary.py --release` で canary バージョンを正式リリース版に変換する
@@ -328,14 +326,14 @@ git checkout -b release/2026.2.0 develop
 python3 canary.py --release
 ```
 
-- バージョンは `2026.2.0-canary.2` → `2026.2.0` のように変換される
-- `CHANGES.md` の `## develop` セクションが `## 2026.2.0` とリリース日に更新される
+- バージョンは `2026.3.0-canary.2` → `2026.3.0` のように変換される
+- `CHANGES.md` の `## develop` セクションが `## 2026.3.0` とリリース日に更新される
 - コミット・タグ・プッシュまで自動で実行される
 
 3. プッシュ後、GitHub Actions の `release.yml` が以下を自動実行する
 
 - GitHub Release の作成
-- 全 8 プラットフォームの prebuilt バイナリのビルドとアップロード
+- 全 12 ターゲット (デスクトップ 8 + iOS / Android 4) の prebuilt バイナリのビルドとアップロード
 - crates.io への公開
 
 4. リリース後、`release/` ブランチを `develop` にマージする

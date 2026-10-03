@@ -31,10 +31,6 @@ jobs:
             rust-target: aarch64-apple-ios-sim
             deployment-target: "14.0"
             os: macos-15
-          - target: ios-sim_x86_64
-            rust-target: x86_64-apple-ios
-            deployment-target: "13.0"
-            os: macos-15
           - target: android_arm64
             rust-target: aarch64-linux-android
             os: ubuntu-24.04
