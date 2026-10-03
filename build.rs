@@ -595,13 +595,6 @@ fn configure_ios_build(build_dir: &Path, target: &str) -> MobileBuildConfig {
             "14.0",
             "-mios-simulator-version-min",
         ),
-        "x86_64-apple-ios" => (
-            "iphonesimulator",
-            "x86_64",
-            "-simulator",
-            "13.0",
-            "-mios-simulator-version-min",
-        ),
         _ => panic!("unsupported iOS target: {target}"),
     };
 
@@ -1105,7 +1098,6 @@ fn get_target_platform() -> String {
         return match rust_target.as_str() {
             "aarch64-apple-ios" => "ios_arm64",
             "aarch64-apple-ios-sim" => "ios-sim_arm64",
-            "x86_64-apple-ios" => "ios-sim_x86_64",
             "aarch64-linux-android" => "android_arm64",
             "x86_64-linux-android" => "android_x86_64",
             _ => panic!("unsupported mobile target: {rust_target}"),
