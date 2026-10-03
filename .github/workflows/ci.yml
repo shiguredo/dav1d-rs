@@ -115,6 +115,10 @@ jobs:
   # デフォルトの prebuilt ダウンロード経路でビルドできることを検証する
   # source-build とは異なり、リリース資産 (curl ダウンロード・SHA256 検証・リンク) の
   # 完全性も同時に検証される
+  #
+  # リリース / canary のバージョンを上げる push では、同じタイミングで push された
+  # タグにより Release ワークフローが資産をアップロード中であり、build.rs の
+  # ダウンロードが 404 で競合する。資産が公開されるまで待ってから検証する
   prebuilt:
     name: prebuilt-${{ matrix.os }}
     needs: fmt-clippy
@@ -123,11 +127,34 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
+            target: ubuntu-24.04_x86_64
           - os: windows-2025
+            target: windows_x86_64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
+    env:
+      # 待機する資産と build.rs がダウンロードする資産を一致させる
+      DAV1D_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Release ワークフローのアップロード完了まで最大 15 分待機する。
+      # タグが存在しないバージョン (リリース前) の場合は待機後に明示的に失敗する
+      - name: Wait for prebuilt assets
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | sed 's/^version = "\(.*\)"/\1/')
+          base_url="https://github.com/shiguredo/dav1d-rs/releases/download/${version}/dav1d-${DAV1D_TARGET}"
+          for attempt in $(seq 1 60); do
+            if curl -fsSIL -o /dev/null "${base_url}.tar.gz" \
+              && curl -fsSIL -o /dev/null "${base_url}.tar.gz.sha256"; then
+              echo "prebuilt assets are available: ${base_url}"
+              exit 0
+            fi
+            echo "waiting for prebuilt assets (${attempt}/60): ${base_url}"
+            sleep 15
+          done
+          echo "::error::prebuilt assets not found: ${base_url}"
+          exit 1
       - run: rustup update stable
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
