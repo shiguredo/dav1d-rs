@@ -69,7 +69,27 @@ fn main() {
 // ドキュメント生成時はリンクも実行されないため、関数は extern ブロックの
 // スタブとして定義する。EAGAIN 等の errno 値はプラットフォーム依存だが、
 // ダミーはドキュメント生成専用のため macOS の値 (35, 12) を使用する。
-use std::ffi::{c_char, c_int};
+use std::ffi::{c_char, c_int, c_void};
+
+// docs.rs は x86_64 Linux でビルドされるため、va_list の定義はそのターゲットに合わせる。
+// ダミーはリンクも実行もしないため、va_list 自体はポインタとして定義し、
+// ローカルの別ホストで DOCS_RS=1 を検証したときに FFI 警告を出さないようにする。
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct __va_list_tag {
+    pub gp_offset: u32,
+    pub fp_offset: u32,
+    pub overflow_arg_area: *mut c_void,
+    pub reg_save_area: *mut c_void,
+}
+pub type va_list = *mut c_char;
+#[cfg(all(any(target_os = "linux", target_os = "android"), target_arch = "x86_64"))]
+pub type VaListArg = *mut __va_list_tag;
+#[cfg(not(all(
+    any(target_os = "linux", target_os = "android"),
+    target_arch = "x86_64"
+)))]
+pub type VaListArg = va_list;
 
 pub const EAGAIN: u32 = 35;
 pub const ENOMEM: u32 = 12;
@@ -224,6 +244,26 @@ pub struct Dav1dPicture {
 
 #[derive(Debug)]
 #[repr(C)]
+pub struct Dav1dPicAllocator {
+    pub cookie: *mut c_void,
+    pub alloc_picture_callback: Option<
+        unsafe extern "C" fn(pic: *mut Dav1dPicture, cookie: *mut c_void) -> c_int,
+    >,
+    pub release_picture_callback:
+        Option<unsafe extern "C" fn(pic: *mut Dav1dPicture, cookie: *mut c_void)>,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Dav1dLogger {
+    pub cookie: *mut c_void,
+    pub callback: Option<
+        unsafe extern "C" fn(cookie: *mut c_void, format: *const c_char, ap: VaListArg),
+    >,
+}
+
+#[derive(Debug)]
+#[repr(C)]
 pub struct Dav1dSettings {
     pub n_threads: c_int,
     pub max_frame_delay: c_int,
@@ -231,10 +271,13 @@ pub struct Dav1dSettings {
     pub operating_point: c_int,
     pub all_layers: c_int,
     pub frame_size_limit: usize,
+    pub allocator: Dav1dPicAllocator,
+    pub logger: Dav1dLogger,
     pub strict_std_compliance: c_int,
     pub output_invisible_frames: c_int,
     pub inloop_filters: Dav1dInloopFilterType,
     pub decode_frame_type: Dav1dDecodeFrameType,
+    pub reserved: [u8; 16],
 }
 
 #[derive(Debug)]

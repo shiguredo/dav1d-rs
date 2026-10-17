@@ -11,6 +11,9 @@
 
 ## develop
 
+- [ADD] `DecoderConfig` に `logger` を追加し、dav1d のログ出力を破棄またはコールバックで受け取れるようにする
+  - @voluntas
+
 ### misc
 
 - [UPDATE] `rust-toolchain.toml` の channel を MSRV (1.93) に固定し、CI も同ツールチェーンで実行する
