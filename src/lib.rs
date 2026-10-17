@@ -3,7 +3,11 @@
 //! [dav1d]: https://github.com/videolan/dav1d
 #![warn(missing_docs)]
 
-use std::{ffi::CStr, ffi::c_int, mem::MaybeUninit};
+use std::{
+    ffi::{CStr, c_char, c_int, c_void},
+    mem::MaybeUninit,
+    sync::Arc,
+};
 
 mod sys;
 
@@ -518,6 +522,41 @@ impl DecodeFrameType {
     }
 }
 
+/// dav1d のログ出力の扱い
+///
+/// dav1d はデコード中に `Error parsing OBU data` などのメッセージを出す。
+/// 既定の [`Logger::Stderr`] では dav1d が stderr へ直接書き出す
+#[derive(Clone)]
+pub enum Logger {
+    /// dav1d 既定の stderr 出力
+    Stderr,
+    /// ログを破棄する
+    Discard,
+    /// 整形済みのメッセージをコールバックへ渡す
+    ///
+    /// コールバックはデコード中の任意のタイミングで、メインスレッドと
+    /// ワーカースレッドの両方から呼ばれる。コールバックの中で
+    /// [`Decoder`] のメソッドを呼ぶと再入状態になるため呼ばないこと。
+    /// コールバックがパニックすると `extern "C"` の境界を越えるため
+    /// プロセスが abort する。コールバックが長時間ブロックすると
+    /// デコードが止まる。
+    ///
+    /// メッセージは末尾の改行を取り除いた状態で渡される。
+    /// 1 KiB を超えるメッセージは切り詰められる
+    Callback(Arc<dyn Fn(&str) + Send + Sync>),
+}
+
+impl std::fmt::Debug for Logger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stderr => f.write_str("Stderr"),
+            Self::Discard => f.write_str("Discard"),
+            // クロージャは Debug を実装しないため、保持していることだけを示す
+            Self::Callback(_) => f.write_str("Callback(..)"),
+        }
+    }
+}
+
 /// デコーダーの設定
 #[derive(Debug, Clone)]
 pub struct DecoderConfig {
@@ -544,6 +583,8 @@ pub struct DecoderConfig {
     pub inloop_filters: InloopFilterType,
     /// デコードするフレーム種別
     pub decode_frame_type: DecodeFrameType,
+    /// dav1d のログ出力の扱い
+    pub logger: Logger,
 }
 
 impl DecoderConfig {
@@ -562,6 +603,7 @@ impl DecoderConfig {
             output_invisible_frames: false,
             inloop_filters: InloopFilterType::ALL,
             decode_frame_type: DecodeFrameType::All,
+            logger: Logger::Stderr,
         }
     }
 
@@ -594,10 +636,117 @@ impl Default for DecoderConfig {
     }
 }
 
+/// dav1d のログメッセージを受け取るバッファのサイズ
+///
+/// dav1d 1.5.4 のメッセージは短いため、固定長で足りる。
+/// 確保を行わないのは、ログがワーカースレッドから呼ばれても
+/// アロケータを揺らさないため
+const LOG_MESSAGE_BUFFER_SIZE: usize = 1024;
+
+// dav1d のログコールバックの第 3 引数は va_list で、そのバインディング上の型は
+// ターゲットによって異なる。x86_64 の Linux / Android では va_list が配列型であり、
+// C の関数引数ではポインタへ減衰するため、コールバックの引数もポインタになる。
+// それ以外の対応ターゲットでは va_list がそのまま現れる。
+#[cfg(all(
+    any(target_os = "linux", target_os = "android"),
+    target_arch = "x86_64"
+))]
+type VaListArg = *mut sys::__va_list_tag;
+#[cfg(not(all(
+    any(target_os = "linux", target_os = "android"),
+    target_arch = "x86_64"
+)))]
+type VaListArg = sys::va_list;
+
+// libc クレートは対応ターゲットで va_list と vsnprintf を公開していないため、
+// C 標準ライブラリの vsnprintf を直接宣言する。第 4 引数の型が C 側の宣言と
+// 食い違うとリンク後の呼び出しが壊れるため、VaListArg を上記のとおり合わせている。
+unsafe extern "C" {
+    fn vsnprintf(s: *mut c_char, n: usize, format: *const c_char, ap: VaListArg) -> c_int;
+}
+
+/// ログコールバックの cookie が指すデータ
+///
+/// dav1d はワーカースレッドからもログを出すため、コールバックは
+/// スレッド間で共有できる必要がある
+struct LogCookie {
+    callback: Arc<dyn Fn(&str) + Send + Sync>,
+}
+
+impl std::fmt::Debug for LogCookie {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LogCookie(..)")
+    }
+}
+
+/// dav1d から呼ばれるログコールバック
+///
+/// 第 3 引数の `va_list` は Rust から読めないため、`vsnprintf` で整形してから
+/// 利用者のコールバックへ渡す
+///
+/// # Safety
+///
+/// `cookie` は [`Decoder`] が所有する [`LogCookie`] のポインタであること。
+/// `format` と `ap` は dav1d が渡す vprintf 互換の書式文字列と、それに対応する
+/// 可変長引数であること
+unsafe extern "C" fn log_callback(cookie: *mut c_void, format: *const c_char, ap: VaListArg) {
+    // SAFETY: cookie は Decoder が所有する Box<LogCookie> のポインタであり、
+    // dav1d_close() が完了するまで有効である
+    let Some(log_cookie) = (unsafe { (cookie as *const LogCookie).as_ref() }) else {
+        return;
+    };
+
+    // ログはワーカースレッドからも呼ばれるため、確保を避けて固定長バッファで受ける
+    let mut buf: [c_char; LOG_MESSAGE_BUFFER_SIZE] = [0; LOG_MESSAGE_BUFFER_SIZE];
+    // SAFETY: format と ap は dav1d が渡した有効な組であり、buf は
+    // LOG_MESSAGE_BUFFER_SIZE バイトある
+    let written = unsafe { vsnprintf(buf.as_mut_ptr(), buf.len(), format, ap) };
+    if written < 0 {
+        return;
+    }
+
+    // SAFETY: vsnprintf は成功時に NUL 終端する
+    let message = unsafe { CStr::from_ptr(buf.as_ptr()) };
+    let Ok(message) = message.to_str() else {
+        // dav1d のメッセージは ASCII のみのため、UTF-8 でないものは捨てる
+        return;
+    };
+    (log_cookie.callback)(message.trim_end_matches('\n'));
+}
+
+/// 設定されたログ出力の扱いを dav1d の設定へ反映する
+///
+/// 戻り値は `logger.cookie` に渡したデータの所有者である。
+/// この所有者は `dav1d_close()` が完了するまで解放してはならない
+fn apply_logger(logger: &Logger, settings: &mut sys::Dav1dSettings) -> Option<Box<LogCookie>> {
+    match logger {
+        // dav1d_default_settings() が設定した既定のコールバックをそのまま使う
+        Logger::Stderr => None,
+        Logger::Discard => {
+            // dav1d_log() は callback が NULL なら何もせずに戻る
+            settings.logger.callback = None;
+            None
+        }
+        Logger::Callback(callback) => {
+            let cookie = Box::new(LogCookie {
+                callback: Arc::clone(callback),
+            });
+            settings.logger.cookie = (&*cookie as *const LogCookie).cast_mut().cast();
+            settings.logger.callback = Some(log_callback);
+            Some(cookie)
+        }
+    }
+}
+
 /// AV1 デコーダー
 #[derive(Debug)]
 pub struct Decoder {
     ctx: *mut sys::Dav1dContext,
+    /// dav1d のログコールバックへ渡した cookie の所有者
+    ///
+    /// dav1d は `dav1d_close()` の最中にもワーカースレッドからログを出しうるため、
+    /// `dav1d_close()` が完了した後 ([`Drop`] の実行後) に解放する
+    _log_cookie: Option<Box<LogCookie>>,
 }
 
 impl Decoder {
@@ -605,6 +754,8 @@ impl Decoder {
     ///
     /// `operating_point` は 0-31 の範囲で指定すること。
     /// 不正な設定値を渡した場合は dav1d がエラーを返す
+    ///
+    /// ログ出力の扱いは [`DecoderConfig::logger`] で指定する
     pub fn new(config: DecoderConfig) -> Result<Self, Error> {
         let mut settings = MaybeUninit::<sys::Dav1dSettings>::zeroed();
         unsafe {
@@ -621,12 +772,17 @@ impl Decoder {
             settings.output_invisible_frames = config.output_invisible_frames as c_int;
             settings.inloop_filters = config.inloop_filters.to_raw();
             settings.decode_frame_type = config.decode_frame_type.to_raw();
+            // dav1d_open() の最中にもログが出るため、open の前に設定する
+            let log_cookie = apply_logger(&config.logger, &mut settings);
 
             let mut ctx = std::ptr::null_mut();
             let code = sys::dav1d_open(&mut ctx, &settings);
             Error::check(code, "dav1d_open")?;
 
-            Ok(Self { ctx })
+            Ok(Self {
+                ctx,
+                _log_cookie: log_cookie,
+            })
         }
     }
 
@@ -1166,6 +1322,7 @@ unsafe impl Sync for DecodedFrame {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     /// プレーンの有効画素 (パディングを除く) が全て指定値であることを検証する
     fn assert_plane_value(plane: &[u8], stride: usize, width: usize, height: usize, value: u8) {
@@ -1215,6 +1372,89 @@ mod tests {
     fn init_decoder_default() {
         let config = DecoderConfig::default();
         assert!(Decoder::new(config).is_ok());
+    }
+
+    #[test]
+    fn logger_settings() {
+        // dav1d の既定設定では stderr へ書き出すコールバックが設定される
+        let mut settings = MaybeUninit::<sys::Dav1dSettings>::zeroed();
+        unsafe {
+            sys::dav1d_default_settings(settings.as_mut_ptr());
+        }
+        let mut settings = unsafe { settings.assume_init() };
+        assert!(
+            settings.logger.callback.is_some(),
+            "dav1d の既定設定にログコールバックがない"
+        );
+
+        // Stderr は既定のコールバックを変更しない
+        let cookie = apply_logger(&Logger::Stderr, &mut settings);
+        assert!(cookie.is_none(), "Stderr で cookie が設定された");
+        assert!(
+            settings.logger.callback.is_some(),
+            "Stderr で既定のコールバックが外れた"
+        );
+
+        // Discard はコールバックを外す (dav1d_log() は callback が NULL なら何もしない)
+        let cookie = apply_logger(&Logger::Discard, &mut settings);
+        assert!(cookie.is_none(), "Discard で cookie が設定された");
+        assert!(
+            settings.logger.callback.is_none(),
+            "Discard でコールバックが残っている"
+        );
+
+        // Callback はコールバックと cookie を設定する
+        let cookie = apply_logger(
+            &Logger::Callback(Arc::new(|_message: &str| {})),
+            &mut settings,
+        );
+        assert!(cookie.is_some(), "Callback で cookie の所有者が返らない");
+        assert!(
+            settings.logger.callback.is_some(),
+            "Callback でコールバックが設定されていない"
+        );
+        assert!(
+            !settings.logger.cookie.is_null(),
+            "Callback で cookie が null になっている"
+        );
+    }
+
+    #[test]
+    fn logger_callback_receives_message() {
+        // 640x480 の黒フレームのストリームの先頭 20 バイトだけを渡す。
+        // キーフレーム OBU が途中で切れるため、dav1d は OBU のパースに失敗して
+        // "Overrun in OBU bit buffer" などをログに出す
+        let data = [
+            10, 11, 0, 0, 0, 36, 196, 255, 223, 63, 254, 96, 16, 50, 35, 16, 0, 144, 0, 0,
+        ];
+        // ログはワーカースレッドから呼ばれることがあるため、Mutex で集約する
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&messages);
+        let mut config = DecoderConfig::new();
+        config.logger = Logger::Callback(Arc::new(move |message| {
+            sink.lock()
+                .expect("ログを集約する Mutex が毒された")
+                .push(message.to_string());
+        }));
+        let mut decoder = Decoder::new(config).expect("デコーダーの生成に失敗");
+
+        // パースに失敗するデータなので戻り値は問わない
+        let _ = decoder.decode(&data);
+
+        let messages = messages.lock().expect("ログを集約する Mutex が毒された");
+        assert!(
+            !messages.is_empty(),
+            "壊れた OBU で dav1d のログがコールバックへ届かなかった"
+        );
+        assert!(
+            messages.iter().any(|message| message.contains("OBU")),
+            "OBU のパース失敗を示すメッセージがない: {messages:?}"
+        );
+        // 末尾の改行は取り除かれている
+        assert!(
+            messages.iter().all(|message| !message.ends_with('\n')),
+            "改行が残っている: {messages:?}"
+        );
     }
 
     #[test]

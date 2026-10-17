@@ -26,6 +26,7 @@ Please read <https://github.com/shiguredo/oss> before use.
 - 全ピクセルレイアウト対応 (I400, I420, I422, I444)
 - ハイビット深度対応 (8-bit / 10-bit / 12-bit)
 - シンボル名書き換えによるシンボル衝突回避 (`shiguredo_dav1d_` プレフィックス付与)
+- dav1d のログ出力の制御 (stderr / 破棄 / コールバック)
 - prebuilt バイナリによる高速ビルド (デフォルト)
 - ソースからのビルドも可能 (`--features source-build`)
 
@@ -200,11 +201,37 @@ while let Ok(Some(frame)) = decoder.next_frame() {
 | `output_invisible_frames` | `bool` | false | 非表示フレームも符号化順で出力するか (show-existing-frame により同じフレームが 2 回出力されうる) |
 | `inloop_filters` | `InloopFilterType` | ALL | 有効にするインループフィルター |
 | `decode_frame_type` | `DecodeFrameType` | All | デコードするフレーム種別 |
+| `logger` | `Logger` | Stderr | dav1d のログ出力の扱い |
+
+### ログ出力
+
+dav1d は `Error parsing OBU data` などのメッセージをログに出す。
+既定では dav1d が stderr へ直接書き出すため、アプリのロガーとは別に出力される。
+`DecoderConfig::logger` で扱いを変更できる。
+
+```rust
+use std::sync::Arc;
+
+// ログを破棄する (example など stderr を静かにしたい場合)
+let mut config = DecoderConfig::new();
+config.logger = Logger::Discard;
+
+// アプリのロガーへ渡す
+// コールバックはメインスレッドとワーカースレッドの両方から呼ばれる点に注意する
+let mut config = DecoderConfig::new();
+config.logger = Logger::Callback(Arc::new(|message| {
+    eprintln!("dav1d: {message}");
+}));
+```
+
+コールバックは `Fn(&str) + Send + Sync + 'static` を満たす必要がある。
+メッセージは末尾の改行を取り除いた状態で渡され、1 KiB を超えるものは切り詰められる。
+コールバックの中で `Decoder` のメソッドを呼ばないこと。
+コールバックがパニックするとプロセスが abort する。
 
 ### 未対応の dav1d 機能
 
 - カスタムピクセルアロケータ (`Dav1dSettings.allocator`)
-- ログコールバック (`Dav1dSettings.logger`)
 - ゼロコピー入力 (`dav1d_data_wrap` / `dav1d_data_wrap_user_data`)
 
 ### `PixelLayout`
