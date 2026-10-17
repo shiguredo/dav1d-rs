@@ -19,7 +19,7 @@
 | `src/sys.rs` | `build.rs` が生成するバインディングを取り込むだけのモジュール |
 | `build.rs` | prebuilt 取得 / ソースビルド / モバイル向け cross file / シンボル書き換え / docs.rs 向けダミー |
 | `tests/test_psnr.rs` | AOM / SVT-AV1 で実際にエンコードし、デコード結果の PSNR を検証する |
-| `pbt/tests/prop_lib.rs` | noprop による公開 API のプロパティテスト |
+| `pbt/tests/prop_lib.rs` | 公開 API のプロパティテスト |
 | `fuzz/` | cargo-fuzz のターゲット。ワークスペースからは除外している |
 | `skills/shiguredo-dav1d/SKILL.md` | 利用者向けの API リファレンス |
 | `canary.py` | バージョン更新・CHANGES 更新・タグ付け・プッシュを行うリリーススクリプト |
@@ -96,7 +96,6 @@
   - prebuilt 12 個 (デスクトップ 8 + モバイル 4) のビルドとアップロード
   - crates.io への公開
 - リリース後は `release/` ブランチを `develop` にマージする
-- `CHANGES.md` の書式は `shiguredo-changelog` スキルに従う
 
 ## テスト
 
@@ -104,20 +103,14 @@
 - `make test` は `cargo test --workspace --features source-build` を実行する
 - CI では `shiguredo_aom/source-build` と `shiguredo_svt_av1/source-build` も有効にする
 - `tests/test_psnr.rs` は AOM と SVT-AV1 で実際に AV1 を生成し、dav1d のデコード結果を PSNR で検証する
-  - モックやスタブは使わず、実際のエンコーダーとデコーダーを使う
   - PSNR の閾値はプラットフォーム間の SIMD 差を考慮した根拠コメント付きで管理する。閾値を変えるときは根拠も更新する
-- `pbt/` は noprop を使う。再現用のシードは `SHIGUREDO_DAV1D_PBT_SEED` で指定できる
+- `pbt/` の再現用シードは `SHIGUREDO_DAV1D_PBT_SEED` で指定できる
 - `fuzz/` は cargo-fuzz が独立したワークスペースとして管理する。ターゲットを追加したら `fuzz/Cargo.toml` に `[[bin]]` を追加する
-- 単体テストは公開 API に対して `tests/test_<module>.rs` に、private な実装は `src/<module>.rs` の `#[cfg(test)]` モジュールに書く
-- PBT は `pbt/tests/prop_<module>.rs` に書く
-- テストのログメッセージと `#[cfg(test)]` 内の `expect` メッセージは日本語にする
 
 ## CI
 
 - `ci.yml` は `fmt-clippy`、`test` (9 環境)、`prebuilt`、`mobile`、`docs-rs`、`slack_notify` で構成する
 - `paths-ignore` に `**.md` を指定しているため、Markdown だけの変更では CI が動かない
-- GitHub Actions はコミットハッシュ固定で参照し、`# vX.Y.Z` のコメントを付ける
-- action の更新は `update-actions` スキルに従う
 - ツールチェーンは `rust-toolchain.toml` の `channel` で固定する。CI の `rust-cache` に渡す `toolchain` も同じ値にする
 - `prebuilt` ジョブはリリース資産のアップロード完了を最大 15 分待ってから `cargo check` する
 - `mobile.yml` は `workflow_call` 専用で、iOS / Android の prebuilt をビルド・検証・アップロードする
@@ -137,9 +130,7 @@
 - `README.md` が利用者向けの一次ドキュメントである。公開 API・設定・対応環境を変更したら README の表も更新する
 - `skills/shiguredo-dav1d/SKILL.md` は利用者向けの API リファレンスである
   - crate バージョン、dav1d バージョン、対応機能、API、利用時の制約を README と実装に同期させる
-- `CHANGES.md` は変更内容そのものを書く。issue 番号や issue への言及は書かない
-- 公開 API には `#![warn(missing_docs)]` により doc コメントが必須である
-- 仕様由来の処理 (H.273 の列挙値、dav1d の API 契約など) は根拠資料名・節番号と、将来変更されうることをコメントに書く
+  - crate バージョンの更新はリリース準備時に行う
 
 ## 実装上の注意
 
@@ -148,11 +139,10 @@
   - ここ以外で `#[allow(...)]` を追加しない
 - FFI 呼び出しの戻り値は `Error::check()` で検査し、失敗した dav1d 関数名を保持する。EAGAIN は `Error::is_eagain()` で判定する
 - リソースは RAII で管理する。`Decoder` は `Drop` で `dav1d_close`、`DecodedFrame` は `Drop` で参照を解放する
-- `unsafe impl Send` / `unsafe impl Sync` には `SAFETY` コメントで根拠を書く。現状は `Decoder` が `Send` のみ、`DecodedFrame` が `Send + Sync` である
+- スレッド安全性は `Decoder` が `Send` のみ、`DecodedFrame` が `Send + Sync` である
 - フレームのプレーンには行末パディングが含まれる。有効画素を読むときはストライドを考慮する
 - 未対応機能はカスタムピクセルアロケーターとゼロコピー入力である
   - ログ出力は `Logger` で対応済みであり、README やスキルの「未対応」に書かない
-- `canary.py` は Python で書かれている。変更するときは `shiguredo-python` スキルに従う
 
 ## 開発環境
 
