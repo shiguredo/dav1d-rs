@@ -1,7 +1,7 @@
 # dav1d のログ出力をアプリのロガーへ流せるようにし、破棄も選べるようにする
 
 - Created: 2026-10-17
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-10-17
 - Branch: feature/add-logger-callback
 - Polished: 2026-10-17
 - Reporter: @voluntas
@@ -109,3 +109,16 @@ pub enum Logger {
 - README の設定表と「未対応の dav1d 機能」、`build.rs` の DOCS_RS ダミー、CHANGES.md が追従していること
 - prebuilt 経路、`source-build` feature、DOCS_RS の 3 経路でビルドが通ること
 - `cargo clippy --workspace --all-targets --features source-build -- -D warnings` と `cargo test --workspace --features source-build` が通ること
+
+## 解決方法
+
+- `src/lib.rs` に `Logger` enum を追加し、`DecoderConfig::logger` で `Logger::Stderr`（既定）/ `Logger::Discard` / `Logger::Callback(Arc<dyn Fn(&str) + Send + Sync>)` を選べるようにした
+- `Logger::Discard` は `Dav1dSettings.logger.callback` を `None` にして dav1d の既定の stderr 出力を止める
+- `Logger::Callback` は private の `unsafe extern "C" fn` で `vsnprintf` により整形し、末尾の改行を除いてコールバックへ渡す
+  - `va_list` の型は x86_64 の Linux / Android で `*mut sys::__va_list_tag`、それ以外の対応ターゲットで `sys::va_list` とし、`cfg` で切り替えた
+  - 整形用のバッファは 1 KiB の固定長で、ログ出力中に確保を行わない
+- コールバックの cookie は `Decoder` が `Box` で所有し、`dav1d_close()` の完了後に解放する
+- `src/lib.rs` のテストに `logger_settings`（3 種類の設定反映）と `logger_callback_receives_message`（途中で切った OBU を実際にデコードしてメッセージを受信）を追加した
+- `build.rs` の DOCS_RS 向けダミーに `Dav1dLogger` / `Dav1dPicAllocator` / `__va_list_tag` / `va_list` / `VaListArg` と `Dav1dSettings` の `allocator` / `logger` / `reserved` を追加した
+- README の設定表に `logger` を追加し、ログ出力の節を新設、未対応機能からログコールバックを削除した
+- CHANGES.md の `## develop` に [ADD] を追加した
