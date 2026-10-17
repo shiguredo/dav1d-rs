@@ -4,7 +4,7 @@ description: >-
   時雨堂の dav1d (AV1) Rust バインディング shiguredo_dav1d を利用するためのリファレンス。
   Cargo への追加、prebuilt / source-build の選択、iOS / Android 向けビルド、
   AV1 デコード、EAGAIN 処理、DecodedFrame のプレーン / メタデータ、
-  シーケンスヘッダー解析、フィルムグレインに関する質問時に使用。
+  シーケンスヘッダー解析、フィルムグレイン、ログ出力の制御に関する質問時に使用。
 ---
 
 # shiguredo_dav1d
@@ -14,7 +14,8 @@ description: >-
 ## バージョン情報
 
 - crate 名: `shiguredo_dav1d`
-- crate バージョン: 2026.3.0
+- crate バージョン: 2026.4.0-canary.0
+- 公開済み安定版: 2026.3.0
 - dav1d バージョン: 1.5.4
 - Rust Edition: 2024
 - 最小 Rust バージョン: 1.93
@@ -32,6 +33,7 @@ description: >-
 - デコーダーを生成しないシーケンスヘッダー解析
 - フィルムグレインの自動適用と後段適用
 - シーク後のデコーダー状態のリセット
+- dav1d のログ出力の制御 (stderr / 破棄 / コールバック)
 - iOS / Android を含む対応プラットフォームの prebuilt バイナリ
 
 dav1d はソフトウェアデコーダー専用である。
@@ -57,6 +59,9 @@ dav1d をソースからビルドする場合は、`source-build` feature を有
 # dav1d をソースからビルドして AV1 デコードに使用する
 shiguredo_dav1d = { version = "2026.3", features = ["source-build"] }
 ```
+
+上記の例は公開済みの安定版を指す。
+canary の機能を使う場合は `shiguredo_dav1d = "=2026.4.0-canary.0"` のように完全なバージョンを指定する。
 
 ## ビルド方式
 
@@ -283,6 +288,7 @@ pub struct DecoderConfig {
     pub output_invisible_frames: bool,
     pub inloop_filters: InloopFilterType,
     pub decode_frame_type: DecodeFrameType,
+    pub logger: Logger,
 }
 ```
 
@@ -298,6 +304,7 @@ pub struct DecoderConfig {
 | `output_invisible_frames` | `false` | 非表示フレームを符号化順で出力するか |
 | `inloop_filters` | `InloopFilterType::ALL` | 有効にするインループフィルター |
 | `decode_frame_type` | `DecodeFrameType::All` | デコード対象のフレーム種別 |
+| `logger` | `Logger::Stderr` | dav1d のログ出力の扱い |
 
 `DecoderConfig::default()` と `DecoderConfig::new()` は同じ設定を返す。
 
@@ -336,6 +343,41 @@ pub enum DecodeFrameType {
 - `Reference`：参照フレームだけ
 - `Intra`：キーフレームを含むイントラフレームだけ
 - `Key`：キーフレームだけ
+
+### ログ出力
+
+dav1d は `Error parsing OBU data` などのメッセージをログに出す。
+既定では dav1d が stderr へ直接書き出す。
+`DecoderConfig::logger` で扱いを変更できる。
+
+```rust
+use std::sync::Arc;
+
+pub enum Logger {
+    Stderr,
+    Discard,
+    Callback(Arc<dyn Fn(&str) + Send + Sync>),
+}
+```
+
+- `Stderr`：dav1d 既定の stderr 出力 (既定値)
+- `Discard`：ログを破棄する
+- `Callback`：整形済みのメッセージをコールバックへ渡す
+
+```rust
+use std::sync::Arc;
+use shiguredo_dav1d::{DecoderConfig, Logger};
+
+let mut config = DecoderConfig::new();
+config.logger = Logger::Callback(Arc::new(|message| {
+    eprintln!("dav1d: {message}");
+}));
+```
+
+コールバックはメインスレッドとワーカースレッドの両方から呼ばれる。
+メッセージは末尾の改行を取り除いた状態で渡され、1 KiB を超えるものは切り詰められる。
+コールバックの中で `Decoder` のメソッドを呼ばないこと。
+コールバックがパニックすると `extern "C"` の境界を越えるためプロセスが abort する。
 
 ## Decoder の API
 
@@ -727,7 +769,6 @@ pub enum EncodingProfiles {
 ## 利用時の制約
 
 - カスタムピクセルアロケーターには対応しない
-- ログコールバックには対応しない
 - `dav1d_data_wrap` と `dav1d_data_wrap_user_data` を使うゼロコピー入力には対応しない
 - `decode()` は入力を内部バッファーへコピーする
 - `output_invisible_frames = true` では、show-existing-frame により同じフレームが 2 回出力される場合がある
