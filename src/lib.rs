@@ -661,6 +661,11 @@ type VaListArg = sys::va_list;
 // libc クレートは対応ターゲットで va_list と vsnprintf を公開していないため、
 // C 標準ライブラリの vsnprintf を直接宣言する。第 4 引数の型が C 側の宣言と
 // 食い違うとリンク後の呼び出しが壊れるため、VaListArg を上記のとおり合わせている。
+//
+// Windows の UCRT は printf 系の関数をインライン関数として提供し、
+// vsnprintf という名前のエクスポートを持たない。名前でリンクするには
+// 互換シンボルを提供する legacy_stdio_definitions.lib が必要になる。
+#[cfg_attr(windows, link(name = "legacy_stdio_definitions"))]
 unsafe extern "C" {
     fn vsnprintf(s: *mut c_char, n: usize, format: *const c_char, ap: VaListArg) -> c_int;
 }
